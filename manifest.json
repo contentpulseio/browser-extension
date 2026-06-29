@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "ContentPulse Publisher",
+  "version": "1.0.0",
+  "description": "Auto-fill the LinkedIn Article editor with content fetched from your ContentPulse account.",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ContentPulse Publisher",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": ["https://contentpulse.io/*", "https://www.linkedin.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/article/*", "https://www.linkedin.com/pulse/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

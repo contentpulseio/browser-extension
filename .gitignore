@@ -1,0 +1,10 @@
+# Local test harness & scratch — kept out of the public repo
+test/
+
+# Dependencies
+node_modules/
+
+# OS / editor noise
+.DS_Store
+*.log
+Thumbs.db

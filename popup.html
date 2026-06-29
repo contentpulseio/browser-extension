@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>ContentPulse Publisher</title>
+  </head>
+  <body>
+    <header class="cp-header">
+      <img class="cp-logo-mark" src="assets/cp-logo-64.png" alt="ContentPulse logo" width="20" height="20" />
+      <span class="cp-brand">
+        <span class="cp-wordmark">Content<span class="cp-wordmark-accent">Pulse</span></span>
+        <span class="cp-header-tag">Publisher</span>
+      </span>
+      <span id="account-bar" class="cp-account" hidden>
+        <span id="account-workspace" class="cp-account-name"></span>
+        <span id="account-tier" class="cp-tier-badge"></span>
+      </span>
+    </header>
+
+    <nav id="tabbar" class="cp-tabbar" hidden>
+      <button id="tab-list" class="cp-tab" data-tab="list">Publish Queue</button>
+      <button id="tab-settings" class="cp-tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <section id="screen-onboarding" class="cp-screen cp-onboarding" hidden>
+      <div class="cp-hero">
+        <div class="cp-hero-logo">
+          <img src="assets/cp-logo-64.png" alt="ContentPulse" width="40" height="40" />
+        </div>
+        <h1 class="cp-hero-title">Publish your content anywhere</h1>
+        <p class="cp-hero-sub">
+          Push AI-written, SEO-ready articles from your ContentPulse workspace into any editor. Fill in one click, or
+          copy formatted and HTML to paste anywhere.
+        </p>
+      </div>
+
+      <ul class="cp-features">
+        <li class="cp-feature">
+          <span class="cp-feature-ico" aria-hidden="true">✨</span>
+          <span class="cp-feature-txt"><strong>AI content, ready to ship</strong>: pull scheduled &amp; in-review articles from your workspace.</span>
+        </li>
+        <li class="cp-feature">
+          <span class="cp-feature-ico" aria-hidden="true">⚡</span>
+          <span class="cp-feature-txt"><strong>One-click fill</strong>: title, body, headings, links &amp; images dropped into the editor.</span>
+        </li>
+        <li class="cp-feature">
+          <span class="cp-feature-ico" aria-hidden="true">🎯</span>
+          <span class="cp-feature-txt"><strong>SEO built in</strong>: meta title, description, keywords &amp; featured image come along.</span>
+        </li>
+        <li class="cp-feature">
+          <span class="cp-feature-ico" aria-hidden="true">🛟</span>
+          <span class="cp-feature-txt"><strong>Reliable backup</strong>: if an auto-publish integration ever fails, copy formatted or HTML and paste into any platform.</span>
+        </li>
+      </ul>
+
+      <div class="cp-platforms">
+        <div class="cp-platforms-label">Publish to</div>
+        <div class="cp-marquee">
+          <div class="cp-marquee-track" id="platform-marquee"></div>
+        </div>
+      </div>
+
+      <div class="cp-connect-card">
+        <label class="cp-label" for="api-key-input">Connect with your API key</label>
+        <input id="api-key-input" class="cp-input" type="password" placeholder="cp_xxxxxxxxxxxxxxxx" autocomplete="off" />
+        <p id="onboarding-error" class="cp-error" hidden></p>
+        <button id="save-connect-btn" class="cp-btn cp-btn-primary cp-btn-block">Save &amp; Connect</button>
+        <a class="cp-link" href="https://app.contentpulse.io/settings/api-keys" target="_blank" rel="noopener"
+          >Get your API key at ContentPulse</a
+        >
+      </div>
+
+      <div class="cp-promo">
+        <p class="cp-promo-title">New to ContentPulse?</p>
+        <p class="cp-promo-sub">
+          Generate SEO-optimized content with AI and publish it everywhere. Plans from Free to Pro &amp; Agency.
+        </p>
+        <div class="cp-promo-actions">
+          <a class="cp-btn cp-btn-primary cp-btn-block" href="https://app.contentpulse.io/register" target="_blank" rel="noopener"
+            >Create free account</a
+          >
+          <a class="cp-btn cp-btn-ghost cp-btn-block" href="https://contentpulse.io/pricing" target="_blank" rel="noopener"
+            >See plans &amp; features</a
+          >
+        </div>
+      </div>
+
+      <p class="cp-legal">
+        <a href="https://contentpulse.io/privacy" target="_blank" rel="noopener">Privacy</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://contentpulse.io/terms" target="_blank" rel="noopener">Terms</a>
+      </p>
+    </section>
+
+    <section id="screen-list" class="cp-screen" hidden>
+      <div class="cp-list-header">
+        <div class="cp-list-heading">
+          <h1 class="cp-title">Publish Queue</h1>
+          <p class="cp-subtitle">Your ready articles, one click from any platform</p>
+        </div>
+        <button id="refresh-btn" class="cp-icon-btn" title="Refresh" aria-label="Refresh">&#x21bb;</button>
+      </div>
+      <div id="website-filter" class="cp-filter" hidden>
+        <label class="cp-label" for="website-select">Website</label>
+        <div class="cp-select-wrap">
+          <select id="website-select" class="cp-select"></select>
+        </div>
+      </div>
+      <div id="list-loading" class="cp-muted" hidden>Loading articles…</div>
+      <p id="list-error" class="cp-error" hidden></p>
+      <div id="list-empty" class="cp-empty" hidden>No articles ready to publish</div>
+      <div id="article-list" class="cp-list"></div>
+    </section>
+
+    <section id="screen-detail" class="cp-screen" hidden>
+      <button id="detail-back-btn" class="cp-back">&#8592; Back to queue</button>
+      <div class="cp-detail-actions">
+        <button id="fill-btn" class="cp-btn cp-btn-primary">Fill in editor</button>
+        <button id="manage-btn" class="cp-btn cp-btn-secondary">Manage in ContentPulse</button>
+      </div>
+      <div class="cp-card cp-detail-head">
+        <div class="cp-detail-titlebar">
+          <h1 id="detail-title" class="cp-title"></h1>
+          <button class="cp-copy-btn" data-copy="title" title="Copy title">Copy</button>
+        </div>
+        <div class="cp-meta">
+          <span id="detail-wordcount" class="cp-badge cp-badge-muted"></span>
+          <span id="detail-status" class="cp-badge"></span>
+        </div>
+        <p id="detail-excerpt" class="cp-excerpt"></p>
+      </div>
+
+      <div class="cp-platform-tabs" id="platform-tabs" role="tablist"></div>
+      <div id="platform-action" class="cp-card cp-platform-action"></div>
+      <p id="detail-error" class="cp-error" hidden></p>
+
+      <div id="detail-image-wrap" class="cp-card cp-detail-image-wrap" hidden>
+        <div class="cp-field-label">Featured image</div>
+        <img id="detail-image" class="cp-detail-image" alt="Featured image" />
+        <div class="cp-copy-row">
+          <button id="download-image-btn" class="cp-btn cp-btn-secondary cp-btn-sm">Download image</button>
+          <button id="copy-image-url" class="cp-btn cp-btn-secondary cp-btn-sm">Copy image link</button>
+        </div>
+        <div id="detail-credit-row" class="cp-seo-row" hidden>
+          <div class="cp-seo-keyrow">
+            <span class="cp-seo-key">Credit and caption</span>
+            <button class="cp-copy-btn cp-copy-mini" data-copy="credit_caption">Copy</button>
+          </div>
+          <div id="detail-credit" class="cp-seo-val"></div>
+          <p class="cp-help">In the editor, click "Add credit and caption" under the image and paste this.</p>
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-field-label">Article content</div>
+        <p class="cp-help">If the editor does not fill automatically, copy the content and paste it. Formatted copy keeps headings, links and styling.</p>
+        <div class="cp-copy-row">
+          <button id="copy-body-html" class="cp-btn cp-btn-secondary cp-btn-sm">Copy formatted</button>
+          <button id="copy-body-text" class="cp-btn cp-btn-secondary cp-btn-sm">Copy as text</button>
+          <button id="copy-body-raw" class="cp-btn cp-btn-secondary cp-btn-sm">Copy HTML</button>
+        </div>
+      </div>
+
+      <div id="detail-seo" class="cp-card" hidden>
+        <div class="cp-field-label">SEO</div>
+        <p class="cp-help">Paste these into the editor's Settings panel (SEO title and description).</p>
+        <div id="seo-meta-title-row" class="cp-seo-row" hidden>
+          <div class="cp-seo-keyrow"><span class="cp-seo-key">Meta title</span><button class="cp-copy-btn cp-copy-mini" data-copy="meta_title">Copy</button></div>
+          <div id="seo-meta-title" class="cp-seo-val"></div>
+        </div>
+        <div id="seo-meta-desc-row" class="cp-seo-row" hidden>
+          <div class="cp-seo-keyrow"><span class="cp-seo-key">Meta description</span><button class="cp-copy-btn cp-copy-mini" data-copy="meta_description">Copy</button></div>
+          <div id="seo-meta-desc" class="cp-seo-val"></div>
+        </div>
+        <div id="seo-slug-row" class="cp-seo-row" hidden>
+          <div class="cp-seo-keyrow"><span class="cp-seo-key">Slug</span><button class="cp-copy-btn cp-copy-mini" data-copy="slug">Copy</button></div>
+          <div id="seo-slug" class="cp-seo-val cp-mono"></div>
+        </div>
+        <div id="seo-keywords-row" class="cp-seo-row" hidden>
+          <div class="cp-seo-keyrow"><span class="cp-seo-key">Keywords</span><button class="cp-copy-btn cp-copy-mini" data-copy="keywords">Copy</button></div>
+          <div id="seo-keywords" class="cp-seo-chips"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="screen-settings" class="cp-screen" hidden>
+      <div class="cp-card">
+        <div class="cp-field-label">Signed in as</div>
+        <div id="settings-name" class="cp-field-value"></div>
+        <div id="settings-email" class="cp-field-sub"></div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-field-label">API Key</div>
+        <div id="settings-key" class="cp-field-value cp-mono"></div>
+      </div>
+      <button id="change-key-btn" class="cp-btn cp-btn-secondary">Change API Key</button>
+      <p class="cp-help">
+        Opens the connect screen so you can paste a different API key. You stay signed in with your current key until a
+        new one is saved.
+      </p>
+      <button id="disconnect-btn" class="cp-btn cp-btn-danger">Disconnect</button>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
