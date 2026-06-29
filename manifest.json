@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ContentPulse Publisher",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Auto-fill the LinkedIn Article editor with content fetched from your ContentPulse account.",
   "icons": {
     "16": "assets/icon-16.png",

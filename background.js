@@ -566,6 +566,76 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
   });
 }
 
+// Injected into the LinkedIn editor page (MAIN world) to fill the Article
+// settings SEO fields. The SEO title/description live in LinkedIn's "Article
+// settings" modal (input[name="seoTitle"] max 60, textarea[name="seoDescription"]
+// max 160), so the modal must already be open. Values are set via the native
+// setter + input/change events so LinkedIn's Ember-bound inputs register the
+// change, and are sliced to the field limits (programmatic value assignment does
+// not honour maxlength).
+function cpPageFillSeo(seoTitle, seoDescription) {
+  return new Promise((resolve) => {
+    const toast = (msg, state) => {
+      try {
+        const el = document.createElement('div');
+        el.style.cssText =
+          'position:fixed;bottom:20px;right:20px;z-index:2147483647;padding:12px 16px;border-radius:8px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:320px';
+        el.style.background = state === 'ok' ? '#0a7d33' : '#b3261e';
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 3000);
+      } catch (e) {}
+    };
+
+    const setNative = (el, text) => {
+      try {
+        const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+        el.focus();
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        return true;
+      } catch (err) {
+        console.warn('[ContentPulse][page] SEO native set failed', err);
+        return false;
+      }
+    };
+
+    const findSeoTitle = () =>
+      document.querySelector(
+        'input[name="seoTitle"], input[aria-label*="SEO title" i], input[placeholder*="SEO title" i]',
+      );
+    const findSeoDescription = () =>
+      document.querySelector(
+        'textarea[name="seoDescription"], textarea[aria-label*="SEO description" i], textarea[placeholder*="SEO description" i]',
+      );
+
+    const titleEl = findSeoTitle();
+    const descEl = findSeoDescription();
+
+    if (!titleEl && !descEl) {
+      toast('ContentPulse: Open the Settings (SEO) panel, then try again', 'error');
+      resolve({ ok: false, reason: 'no-seo-fields' });
+      return;
+    }
+
+    let titleOk = false;
+    let descOk = false;
+    if (titleEl && (seoTitle || '').trim() !== '') {
+      titleOk = setNative(titleEl, (seoTitle || '').slice(0, 60));
+    }
+    if (descEl && (seoDescription || '').trim() !== '') {
+      descOk = setNative(descEl, (seoDescription || '').slice(0, 160));
+    }
+
+    const ok = titleOk || descOk;
+    toast(ok ? 'ContentPulse: SEO fields filled' : 'ContentPulse: Could not fill the SEO fields', ok ? 'ok' : 'error');
+    resolve({ ok, titleOk, descOk });
+  });
+}
+
 async function pageFill(tabId, title, bodyHtml, bodyText) {
   if (!tabId) {
     return { ok: false, error: 'No tab id for page fill' };
@@ -582,6 +652,26 @@ async function pageFill(tabId, title, bodyHtml, bodyText) {
     return result || { ok: false, error: 'No result from page fill' };
   } catch (err) {
     console.error('[ContentPulse][bg] pageFill executeScript error', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function pageFillSeo(tabId, seoTitle, seoDescription) {
+  if (!tabId) {
+    return { ok: false, error: 'No tab id for SEO fill' };
+  }
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: cpPageFillSeo,
+      args: [seoTitle || '', seoDescription || ''],
+    });
+    const result = results && results[0] ? results[0].result : null;
+    console.log('[ContentPulse][bg] pageFillSeo result', result);
+    return result || { ok: false, error: 'No result from SEO fill' };
+  } catch (err) {
+    console.error('[ContentPulse][bg] pageFillSeo executeScript error', err);
     return { ok: false, error: err.message };
   }
 }
@@ -636,6 +726,29 @@ function openAndFill(article) {
   });
 }
 
+// Fill the SEO title/description in the currently open LinkedIn editor. Unlike
+// body fill we never open a new tab: the SEO fields live in the editor's Article
+// settings modal, which the user must open first, so we only act on an active
+// editor tab and otherwise return a helpful hint.
+function fillSeoActive(seo) {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const activeTab = tabs && tabs[0];
+
+      if (!activeTab || !isEditorUrl(activeTab.url)) {
+        resolve({
+          ok: false,
+          error: 'Open the LinkedIn article editor and its Settings (SEO) panel first, then click Fill SEO.',
+        });
+        return;
+      }
+
+      const res = await pageFillSeo(activeTab.id, seo?.meta_title || '', seo?.meta_description || '');
+      resolve(res);
+    });
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[ContentPulse][bg] message:', message?.action);
 
@@ -661,6 +774,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       openAndFill(message.article);
       sendResponse({ ok: true });
       return false;
+
+    case 'fillSeo':
+      fillSeoActive(message.seo).then(sendResponse);
+      return true;
 
     default:
       sendResponse({ ok: false, error: `Unknown action: ${message?.action}` });

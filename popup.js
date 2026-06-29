@@ -652,6 +652,51 @@ async function handleFill() {
   }
 }
 
+async function handleFillSeo() {
+  if (!selectedArticle) return;
+  $('detail-error').hidden = true;
+
+  const seo = selectedArticle.seo || {};
+  const metaTitle = seo.meta_title || '';
+  const metaDescription = seo.meta_description || '';
+
+  if (metaTitle.trim() === '' && metaDescription.trim() === '') {
+    const el = $('detail-error');
+    el.textContent = 'This article has no SEO title or description to fill.';
+    el.hidden = false;
+    return;
+  }
+
+  const btn = $('fill-seo-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Filling…';
+
+  console.log('[ContentPulse][popup] fill SEO ->', selectedArticle.title);
+  const res = await sendMessage({
+    action: 'fillSeo',
+    seo: { meta_title: metaTitle, meta_description: metaDescription },
+  });
+
+  btn.disabled = false;
+
+  if (res && res.ok) {
+    btn.textContent = 'Filled ✓';
+    btn.classList.add('cp-copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('cp-copied');
+    }, 1600);
+    return;
+  }
+
+  btn.textContent = original;
+  const el = $('detail-error');
+  el.textContent =
+    res?.error || 'Could not fill the SEO fields. Open the LinkedIn article editor and its Settings (SEO) panel, then try again.';
+  el.hidden = false;
+}
+
 async function renderSettings() {
   const { user, apiKey } = await getStored(['user', 'apiKey']);
   $('settings-name').textContent = user?.name || 'Unknown user';
@@ -686,6 +731,7 @@ async function init() {
   $('tab-settings').addEventListener('click', () => showTab('settings'));
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
+  $('fill-seo-btn').addEventListener('click', handleFillSeo);
   $('download-image-btn').addEventListener('click', handleDownloadImage);
   $('copy-image-url').addEventListener('click', handleCopyImageUrl);
   $('manage-btn').addEventListener('click', handleManage);
