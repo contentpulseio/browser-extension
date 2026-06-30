@@ -1,11 +1,19 @@
 const $ = (id) => document.getElementById(id);
 
+const CP_DEBUG = false;
+const log = (...args) => {
+  if (CP_DEBUG) console.log(...args);
+};
+const warn = (...args) => {
+  if (CP_DEBUG) console.warn(...args);
+};
+
 const SCREENS = ['screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings'];
 
 const APP_BASE_URL = 'https://app.contentpulse.io';
 
 function showScreen(id) {
-  console.log('[ContentPulse][popup] show screen', id);
+  log('[ContentPulse][popup] show screen', id);
   for (const s of SCREENS) {
     $(s).hidden = s !== id;
   }
@@ -48,7 +56,7 @@ async function sendMessage(message, attempts = 3) {
     if (!isConnError) {
       return res;
     }
-    console.warn(`[ContentPulse][popup] worker not ready (attempt ${i + 1}/${attempts}), retrying…`);
+    warn(`[ContentPulse][popup] worker not ready (attempt ${i + 1}/${attempts}), retrying…`);
     await new Promise((r) => setTimeout(r, 150 * (i + 1)));
   }
   return { ok: false, status: 0, error: 'Background service worker did not respond. Try again.' };
@@ -225,7 +233,7 @@ async function loadWebsites() {
 async function handleWebsiteChange() {
   selectedWebsiteId = $('website-select').value || null;
   await setStored({ selectedWebsiteId });
-  console.log('[ContentPulse][popup] website filter ->', selectedWebsiteId);
+  log('[ContentPulse][popup] website filter ->', selectedWebsiteId);
   await loadArticles(selectedWebsiteId);
 }
 
@@ -263,7 +271,7 @@ async function handleSaveConnect() {
 
   btn.disabled = true;
   btn.textContent = 'Connecting…';
-  console.log('[ContentPulse][popup] validating key');
+  log('[ContentPulse][popup] validating key');
 
   const res = await sendMessage({ action: 'validateKey', apiKey });
 
@@ -272,7 +280,7 @@ async function handleSaveConnect() {
 
   if (res && res.ok) {
     await setStored({ apiKey, user: res.user, tenant: res.tenant });
-    console.log('[ContentPulse][popup] connected as', res.user?.email);
+    log('[ContentPulse][popup] connected as', res.user?.email);
 
     await enterConnectedShell();
     return;
@@ -296,7 +304,7 @@ async function loadArticles(websiteId = selectedWebsiteId) {
 
   if (!res || !res.ok) {
     if (res && res.status === 401) {
-      console.warn('[ContentPulse][popup] 401 from getArticles, returning to connect');
+      warn('[ContentPulse][popup] 401 from getArticles, returning to connect');
       await clearStored();
       enterDisconnectedShell();
       showOnboardingError('Your session expired. Please reconnect.');
@@ -499,7 +507,7 @@ async function handleDownloadImage() {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   } catch (err) {
-    console.warn('[ContentPulse][popup] image download failed, opening in a tab', err);
+    warn('[ContentPulse][popup] image download failed, opening in a tab', err);
     chrome.tabs.create({ url });
   } finally {
     btn.disabled = false;
@@ -529,7 +537,7 @@ async function copyPlainText(text) {
     await navigator.clipboard.writeText(text || '');
     return true;
   } catch (err) {
-    console.warn('[ContentPulse][popup] clipboard text failed', err);
+    warn('[ContentPulse][popup] clipboard text failed', err);
     return false;
   }
 }
@@ -546,7 +554,7 @@ async function copyFormattedHtml(html) {
       return true;
     }
   } catch (err) {
-    console.warn('[ContentPulse][popup] clipboard html failed, falling back to text', err);
+    warn('[ContentPulse][popup] clipboard html failed, falling back to text', err);
   }
   return copyPlainText(safeHtml);
 }
@@ -637,7 +645,7 @@ async function handleFill() {
   if (!selectedArticle) return;
   $('detail-error').hidden = true;
 
-  console.log('[ContentPulse][popup] fill ->', selectedArticle.title);
+  log('[ContentPulse][popup] fill ->', selectedArticle.title);
   const res = await sendMessage({
     action: 'openAndFill',
     article: { title: selectedArticle.title, body_html: selectedArticle.body_html },
@@ -672,7 +680,7 @@ async function handleFillSeo() {
   btn.disabled = true;
   btn.textContent = 'Filling…';
 
-  console.log('[ContentPulse][popup] fill SEO ->', selectedArticle.title);
+  log('[ContentPulse][popup] fill SEO ->', selectedArticle.title);
   const res = await sendMessage({
     action: 'fillSeo',
     seo: { meta_title: metaTitle, meta_description: metaDescription },
@@ -705,7 +713,7 @@ async function renderSettings() {
 }
 
 async function handleChangeKey() {
-  console.log('[ContentPulse][popup] change API key (no reset until a new key is saved)');
+  log('[ContentPulse][popup] change API key (no reset until a new key is saved)');
   $('api-key-input').value = '';
   showOnboardingError('');
   enterDisconnectedShell();
@@ -714,7 +722,7 @@ async function handleChangeKey() {
 async function handleDisconnect() {
   const confirmed = window.confirm('Disconnect ContentPulse? You will need to re-enter your API key.');
   if (!confirmed) return;
-  console.log('[ContentPulse][popup] disconnect');
+  log('[ContentPulse][popup] disconnect');
   await clearStored();
   window.location.reload();
 }
@@ -750,7 +758,7 @@ async function init() {
     return;
   }
 
-  console.log('[ContentPulse][popup] existing key found, verifying it is still valid');
+  log('[ContentPulse][popup] existing key found, verifying it is still valid');
   const res = await sendMessage({ action: 'validateKey', apiKey });
 
   if (res && res.ok) {
@@ -760,14 +768,14 @@ async function init() {
   }
 
   if (res && res.status === 401) {
-    console.warn('[ContentPulse][popup] stored key is no longer valid, signing out');
+    warn('[ContentPulse][popup] stored key is no longer valid, signing out');
     await clearStored();
     enterDisconnectedShell();
     showOnboardingError('Your access has ended or the key was revoked. Please reconnect.');
     return;
   }
 
-  console.warn('[ContentPulse][popup] could not verify key (offline?), showing cached queue');
+  warn('[ContentPulse][popup] could not verify key (offline?), showing cached queue');
   await enterConnectedShell();
 }
 

@@ -1,4 +1,15 @@
-console.log('[ContentPulse][cs] content script loaded on', location.href);
+const CP_DEBUG = false;
+const log = (...args) => {
+  if (CP_DEBUG) console.log(...args);
+};
+const warn = (...args) => {
+  if (CP_DEBUG) console.warn(...args);
+};
+const err = (...args) => {
+  if (CP_DEBUG) console.error(...args);
+};
+
+log('[ContentPulse][cs] content script loaded on', location.href);
 
 const MAX_ATTEMPTS = 10;
 const ATTEMPT_INTERVAL_MS = 500;
@@ -54,7 +65,7 @@ function waitForEditor() {
       attempts += 1;
       const titleEl = findFirst(TITLE_SELECTORS);
       const bodyEl = findFirst(BODY_SELECTORS);
-      console.log(`[ContentPulse][cs] editor probe ${attempts}/${MAX_ATTEMPTS}`, {
+      log(`[ContentPulse][cs] editor probe ${attempts}/${MAX_ATTEMPTS}`, {
         title: !!titleEl,
         body: !!bodyEl,
       });
@@ -92,7 +103,7 @@ function insertText(el, text) {
   try {
     inserted = document.execCommand('insertText', false, text);
   } catch (err) {
-    console.warn('[ContentPulse][cs] execCommand insertText threw', err);
+    warn('[ContentPulse][cs] execCommand insertText threw', err);
   }
 
   if (!inserted) {
@@ -151,7 +162,7 @@ function requestPageFill(title, bodyHtml, bodyText) {
 }
 
 async function fillArticle(article) {
-  console.log('[ContentPulse][cs] fillArticle', article?.title);
+  log('[ContentPulse][cs] fillArticle', article?.title);
   const title = article?.title || '';
   const bodyHtml = article?.body || '';
   const bodyText = stripHtml(bodyHtml);
@@ -159,16 +170,16 @@ async function fillArticle(article) {
   if (inExtension() && typeof chrome.runtime.sendMessage === 'function') {
     const res = await requestPageFill(title, bodyHtml, bodyText);
     if (res && res.ok) {
-      console.log('[ContentPulse][cs] background fill complete', res);
+      log('[ContentPulse][cs] background fill complete', res);
       return true;
     }
-    console.warn('[ContentPulse][cs] background fill unavailable/failed, trying DOM fallback', res);
+    warn('[ContentPulse][cs] background fill unavailable/failed, trying DOM fallback', res);
   }
 
   const { titleEl, bodyEl } = await waitForEditor();
 
   if (!titleEl || !bodyEl) {
-    console.error('[ContentPulse][cs] editor fields not found');
+    err('[ContentPulse][cs] editor fields not found');
     showToast('ContentPulse: Could not detect LinkedIn editor, please try again', false);
     return false;
   }
@@ -176,11 +187,11 @@ async function fillArticle(article) {
   try {
     insertText(titleEl, title);
     insertText(bodyEl, bodyText);
-    console.log('[ContentPulse][cs] fill complete');
+    log('[ContentPulse][cs] fill complete');
     showToast('ContentPulse: Article filled successfully', true);
     return true;
   } catch (err) {
-    console.error('[ContentPulse][cs] fill failed', err);
+    err('[ContentPulse][cs] fill failed', err);
     showToast('ContentPulse: Could not detect LinkedIn editor, please try again', false);
     return false;
   }
@@ -197,7 +208,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 window.addEventListener('message', (event) => {
   const data = event.data;
   if (event.source === window && data && data.source === 'contentpulse-test' && data.action === 'fill') {
-    console.log('[ContentPulse][cs] test bridge fill received');
+    log('[ContentPulse][cs] test bridge fill received');
     fillArticle(data.article);
   }
 });

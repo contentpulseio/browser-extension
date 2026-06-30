@@ -2,14 +2,25 @@ const API_BASE = 'https://contentpulse.io/api/v1';
 
 const PENDING_STATUSES = ['draft', 'review', 'scheduled'];
 
-console.log('[ContentPulse][bg] service worker booted');
+const CP_DEBUG = false;
+const log = (...args) => {
+  if (CP_DEBUG) console.log(...args);
+};
+const warn = (...args) => {
+  if (CP_DEBUG) console.warn(...args);
+};
+const err = (...args) => {
+  if (CP_DEBUG) console.error(...args);
+};
+
+log('[ContentPulse][bg] service worker booted');
 
 function getStored(keys) {
   return new Promise((resolve) => chrome.storage.sync.get(keys, (items) => resolve(items)));
 }
 
 async function validateKey(apiKey) {
-  console.log('[ContentPulse][bg] validating API key via /auth/me');
+  log('[ContentPulse][bg] validating API key via /auth/me');
   try {
     const res = await fetch(`${API_BASE}/auth/me`, {
       method: 'GET',
@@ -18,14 +29,14 @@ async function validateKey(apiKey) {
 
     if (res.status === 200) {
       const body = await res.json();
-      console.log('[ContentPulse][bg] key valid, user:', body?.user?.email);
+      log('[ContentPulse][bg] key valid, user:', body?.user?.email);
       return { ok: true, status: 200, user: body.user ?? null, tenant: body.tenant ?? null };
     }
 
-    console.warn('[ContentPulse][bg] key validation failed, status', res.status);
+    warn('[ContentPulse][bg] key validation failed, status', res.status);
     return { ok: false, status: res.status, error: 'Invalid API key, please check your ContentPulse settings' };
   } catch (err) {
-    console.error('[ContentPulse][bg] key validation network error', err);
+    err('[ContentPulse][bg] key validation network error', err);
     return { ok: false, status: 0, error: `Network error: ${err.message}` };
   }
 }
@@ -38,7 +49,7 @@ async function getWebsites() {
 
   try {
     const url = `${API_BASE}/websites?per_page=100`;
-    console.log('[ContentPulse][bg] GET', url);
+    log('[ContentPulse][bg] GET', url);
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
     });
@@ -52,10 +63,10 @@ async function getWebsites() {
         ? body.data
         : [];
     const websites = list.map((w) => ({ id: w.id, name: w.name || 'Untitled site' }));
-    console.log('[ContentPulse][bg] fetched', websites.length, 'websites');
+    log('[ContentPulse][bg] fetched', websites.length, 'websites');
     return { ok: true, status: 200, websites };
   } catch (err) {
-    console.error('[ContentPulse][bg] getWebsites error', err);
+    err('[ContentPulse][bg] getWebsites error', err);
     return { ok: false, status: 0, error: err.message };
   }
 }
@@ -65,7 +76,7 @@ async function fetchByStatus(apiKey, status, websiteId) {
   if (websiteId) {
     url += `&website_id=${encodeURIComponent(websiteId)}`;
   }
-  console.log('[ContentPulse][bg] GET', url);
+  log('[ContentPulse][bg] GET', url);
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
   });
@@ -102,10 +113,10 @@ async function getArticles(websiteId) {
       return da - db;
     });
 
-    console.log('[ContentPulse][bg] fetched', merged.length, 'pending/scheduled articles');
+    log('[ContentPulse][bg] fetched', merged.length, 'pending/scheduled articles');
     return { ok: true, status: 200, articles: merged };
   } catch (err) {
-    console.error('[ContentPulse][bg] getArticles error', err);
+    err('[ContentPulse][bg] getArticles error', err);
     return { ok: false, status: 0, error: err.message };
   }
 }
@@ -140,6 +151,13 @@ function normalizeArticle(item) {
 
 function cpPageFill(titleText, bodyHtml, bodyText) {
   return new Promise((resolve) => {
+    const CP_DEBUG = false;
+    const log = (...args) => {
+      if (CP_DEBUG) console.log(...args);
+    };
+    const warn = (...args) => {
+      if (CP_DEBUG) console.warn(...args);
+    };
     const MAX_ATTEMPTS = 30;
     const INTERVAL_MS = 500;
     let attempts = 0;
@@ -248,7 +266,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
       try {
         Array.from(dp.body.children).forEach(pushBlock);
       } catch (err) {
-        console.warn('[ContentPulse][page] htmlToDoc parse error', err);
+        warn('[ContentPulse][page] htmlToDoc parse error', err);
       }
       if (!out.length) {
         const t = (dp.body.textContent || '').trim();
@@ -282,7 +300,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         quill.setText((text || '') + '\n', 'api');
         return true;
       } catch (err) {
-        console.warn('[ContentPulse][page] quill.setText failed', err);
+        warn('[ContentPulse][page] quill.setText failed', err);
         return false;
       }
     };
@@ -297,7 +315,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
       } catch (err) {
-        console.warn('[ContentPulse][page] native set failed', err);
+        warn('[ContentPulse][page] native set failed', err);
         return false;
       }
     };
@@ -320,7 +338,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
         return (el.textContent || '').trim().length > before;
       } catch (err) {
-        console.warn('[ContentPulse][page] paste failed', err);
+        warn('[ContentPulse][page] paste failed', err);
         return false;
       }
     };
@@ -397,7 +415,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         if (typeof tiptap.commands.focus === 'function') tiptap.commands.focus('end');
         return true;
       } catch (err) {
-        console.warn('[ContentPulse][page] tiptap setContent failed', err);
+        warn('[ContentPulse][page] tiptap setContent failed', err);
         return false;
       }
     };
@@ -417,7 +435,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         el.dispatchEvent(ev);
         return true;
       } catch (err) {
-        console.warn('[ContentPulse][page] paste simulation failed', err);
+        warn('[ContentPulse][page] paste simulation failed', err);
         return false;
       }
     };
@@ -430,13 +448,11 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
       return 'none';
     };
 
-    const expectedLen = (bodyText || '').trim().length;
-    const wipedThreshold = Math.min(20, Math.max(5, Math.floor(expectedLen * 0.2)));
+    const wipedThreshold = 20;
 
     let lastBodyEl = null;
 
     const bodyFilled = (el) => {
-      if (expectedLen === 0) return true;
       return getEditorText(el && el.editor, el).length >= wipedThreshold;
     };
 
@@ -450,22 +466,10 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
 
     setToast('ContentPulse: Filling content, please wait...', 'progress');
 
-    // Timing tuned to LinkedIn's real behaviour the user observed: the FIRST
-    // formatted paste never sticks — LinkedIn mounts/re-renders the editor right
-    // after it and discards the content — while a SECOND formatted paste ~1s
-    // later holds. So we wait longer before the first paste, and after EACH paste
-    // we judge PERSISTENCE only after a settle delay (not the instant it lands),
-    // re-asserting the SAME formatted paste until it survives the re-render.
-    const GRACE_MS = 2200; // let the editor fully mount before the first paste
-    const SETTLE_MS = 1200; // wait after each paste for the re-render, THEN judge
-    const MAX_PASTE_ATTEMPTS = 3; // re-assert the formatted paste until it holds
+    const GRACE_MS = 2200;
+    const SETTLE_MS = 1200;
+    const MAX_PASTE_ATTEMPTS = 3;
 
-    // Fill the body with the FORMATTED paste (the exact path the working "Copy
-    // formatted" button relies on, so LinkedIn converts the rich HTML natively
-    // and formatting is preserved), then VERIFY it PERSISTED after SETTLE_MS. If
-    // the re-render wiped it, re-assert the same formatted paste. We only ever
-    // downgrade to tiptap/plain-text if the paste path is structurally
-    // unavailable — never as a "second fill" that clobbers formatting.
     const fillBodyVerified = (titleOk, attempts) => {
       let settled = false;
       let pasteTries = 0;
@@ -481,7 +485,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
           if (settled) return;
           const el = findBodyEditor() || lastBodyEl;
           if (bodyFilled(el)) {
-            console.log('[ContentPulse][page] body persisted via', method);
+            log('[ContentPulse][page] body persisted via', method);
             settle(true, method);
             return;
           }
@@ -496,12 +500,12 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         try {
           pasteHtml(el);
         } catch (err) {
-          console.warn('[ContentPulse][page] formatted paste threw', err);
+          warn('[ContentPulse][page] formatted paste threw', err);
         }
-        console.log('[ContentPulse][page] formatted paste attempt', pasteTries);
+        log('[ContentPulse][page] formatted paste attempt', pasteTries);
         verifyAfterSettle('paste', () => {
           if (pasteTries < MAX_PASTE_ATTEMPTS) {
-            console.log('[ContentPulse][page] paste did not persist — re-asserting formatted paste');
+            log('[ContentPulse][page] paste did not persist — re-asserting formatted paste');
             tryPaste();
           } else {
             tryTiptap();
@@ -517,7 +521,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
           try {
             applyTiptap(t);
           } catch (err) {
-            console.warn('[ContentPulse][page] tiptap setContent threw', err);
+            warn('[ContentPulse][page] tiptap setContent threw', err);
           }
           verifyAfterSettle('tiptap', tryFallback);
         } else {
@@ -531,7 +535,7 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
         try {
           fillBodyNonTiptap(el);
         } catch (err) {
-          console.warn('[ContentPulse][page] fallback fill threw', err);
+          warn('[ContentPulse][page] fallback fill threw', err);
         }
         verifyAfterSettle('fallback', () => settle(bodyFilled(findBodyEditor() || el), 'exhausted'));
       };
@@ -566,15 +570,12 @@ function cpPageFill(titleText, bodyHtml, bodyText) {
   });
 }
 
-// Injected into the LinkedIn editor page (MAIN world) to fill the Article
-// settings SEO fields. The SEO title/description live in LinkedIn's "Article
-// settings" modal (input[name="seoTitle"] max 60, textarea[name="seoDescription"]
-// max 160), so the modal must already be open. Values are set via the native
-// setter + input/change events so LinkedIn's Ember-bound inputs register the
-// change, and are sliced to the field limits (programmatic value assignment does
-// not honour maxlength).
 function cpPageFillSeo(seoTitle, seoDescription) {
   return new Promise((resolve) => {
+    const CP_DEBUG = false;
+    const warn = (...args) => {
+      if (CP_DEBUG) console.warn(...args);
+    };
     const toast = (msg, state) => {
       try {
         const el = document.createElement('div');
@@ -598,7 +599,7 @@ function cpPageFillSeo(seoTitle, seoDescription) {
         el.dispatchEvent(new Event('blur', { bubbles: true }));
         return true;
       } catch (err) {
-        console.warn('[ContentPulse][page] SEO native set failed', err);
+        warn('[ContentPulse][page] SEO native set failed', err);
         return false;
       }
     };
@@ -648,12 +649,12 @@ async function pageFill(tabId, title, bodyHtml, bodyText) {
       args: [title || '', bodyHtml || '', bodyText || ''],
     });
     const result = results && results[0] ? results[0].result : null;
-    console.log('[ContentPulse][bg] pageFill result', result);
+    log('[ContentPulse][bg] pageFill result', result);
     return result || { ok: false, error: 'No result from page fill' };
   } catch (err) {
-    console.error('[ContentPulse][bg] pageFill executeScript error', err);
+    err('[ContentPulse][bg] pageFill executeScript error', err);
     return { ok: false, error: err.message };
-  }
+  } 
 }
 
 async function pageFillSeo(tabId, seoTitle, seoDescription) {
@@ -668,10 +669,10 @@ async function pageFillSeo(tabId, seoTitle, seoDescription) {
       args: [seoTitle || '', seoDescription || ''],
     });
     const result = results && results[0] ? results[0].result : null;
-    console.log('[ContentPulse][bg] pageFillSeo result', result);
+    log('[ContentPulse][bg] pageFillSeo result', result);
     return result || { ok: false, error: 'No result from SEO fill' };
   } catch (err) {
-    console.error('[ContentPulse][bg] pageFillSeo executeScript error', err);
+    err('[ContentPulse][bg] pageFillSeo executeScript error', err);
     return { ok: false, error: err.message };
   }
 }
@@ -683,32 +684,21 @@ function isEditorUrl(url) {
   return url.startsWith('https://www.linkedin.com/article/') || url.startsWith('https://www.linkedin.com/pulse/');
 }
 
-function stripHtmlSW(html) {
-  return (html || '')
-    .replace(/<\s*(br|\/p|\/div|\/h[1-6]|\/li)\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 function openAndFill(article) {
   const title = article?.title || '';
   const bodyHtml = article?.body_html || article?.body || '';
-  const bodyText = stripHtmlSW(bodyHtml);
-  console.log('[ContentPulse][bg] openAndFill ->', title);
+  log('[ContentPulse][bg] openAndFill ->', title);
 
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const activeTab = tabs && tabs[0];
 
     if (activeTab && isEditorUrl(activeTab.url)) {
-      console.log('[ContentPulse][bg] active tab is already the editor, filling in place');
-      pageFill(activeTab.id, title, bodyHtml, bodyText);
+      log('[ContentPulse][bg] active tab is already the editor, filling in place');
+      pageFill(activeTab.id, title, bodyHtml, '');
       return;
     }
 
-    console.log('[ContentPulse][bg] no editor in the active tab, opening a new one');
+    log('[ContentPulse][bg] no editor in the active tab, opening a new one');
     chrome.tabs.create({ url: LINKEDIN_EDITOR_URL }, (tab) => {
       const targetTabId = tab.id;
 
@@ -716,9 +706,9 @@ function openAndFill(article) {
         if (tabId !== targetTabId || changeInfo.status !== 'complete') {
           return;
         }
-        console.log('[ContentPulse][bg] editor tab ready, filling via executeScript');
+        log('[ContentPulse][bg] editor tab ready, filling via executeScript');
         chrome.tabs.onUpdated.removeListener(listener);
-        pageFill(targetTabId, title, bodyHtml, bodyText);
+        pageFill(targetTabId, title, bodyHtml, '');
       };
 
       chrome.tabs.onUpdated.addListener(listener);
@@ -726,10 +716,6 @@ function openAndFill(article) {
   });
 }
 
-// Fill the SEO title/description in the currently open LinkedIn editor. Unlike
-// body fill we never open a new tab: the SEO fields live in the editor's Article
-// settings modal, which the user must open first, so we only act on an active
-// editor tab and otherwise return a helpful hint.
 function fillSeoActive(seo) {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -750,7 +736,7 @@ function fillSeoActive(seo) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[ContentPulse][bg] message:', message?.action);
+  log('[ContentPulse][bg] message:', message?.action);
 
   switch (message?.action) {
     case 'validateKey':
