@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ContentPulse Publisher",
+  "name": "ContentPulse: AI SEO Content Writer & Publisher",
   "version": "1.1.0",
-  "description": "Auto-fill the LinkedIn Article editor with content fetched from your ContentPulse account.",
+  "description": "Fetch SEO-ready content from ContentPulse and auto-fill it into your publishing editor to review and publish in one click.",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "ContentPulse Publisher",
+    "default_title": "ContentPulse: AI SEO Content Writer & Publisher",
     "default_icon": {
       "16": "assets/icon-16.png",
       "32": "assets/icon-32.png",
