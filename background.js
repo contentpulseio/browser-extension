@@ -121,6 +121,49 @@ async function getArticles(websiteId) {
   }
 }
 
+// Report the public URL of an article published on an extension-only channel
+// (LinkedIn Pulse / Medium). These platforms have no publish API, so the URL is
+// either auto-captured from the editor tab once it lands on the live article, or
+// pasted manually in the popup. The backend upserts the ContentPublication row,
+// which is what lets future articles internally link to this live page.
+async function recordPublication(contentId, platform, remoteUrl) {
+  const { apiKey } = await getStored(['apiKey']);
+  if (!apiKey) {
+    return { ok: false, status: 401, error: 'No API key stored. Please connect first.' };
+  }
+  if (!contentId || !platform || !remoteUrl) {
+    return { ok: false, status: 0, error: 'Missing content, platform or URL.' };
+  }
+
+  try {
+    const url = `${API_BASE}/content/${encodeURIComponent(contentId)}/publications`;
+    log('[ContentPulse][bg] POST', url, platform, remoteUrl);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ platform, remote_url: remoteUrl }),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message =
+        body?.errors?.remote_url?.[0] || body?.message || `Failed to save publish link (${res.status})`;
+      warn('[ContentPulse][bg] recordPublication failed', res.status, message);
+      return { ok: false, status: res.status, error: message };
+    }
+
+    log('[ContentPulse][bg] publication recorded for content', contentId);
+    return { ok: true, status: res.status, publication: body?.data ?? null };
+  } catch (e) {
+    err('[ContentPulse][bg] recordPublication network error', e);
+    return { ok: false, status: 0, error: `Network error: ${e.message}` };
+  }
+}
+
 function normalizeArticle(item) {
   const version = item.current_version || {};
   const title = item.title || version.title || 'Untitled';
@@ -145,6 +188,7 @@ function normalizeArticle(item) {
     excerpt: typeof version.excerpt === 'string' ? version.excerpt : '',
     body_html: bodyHtml,
     image_url: imageUrl,
+    external_url: typeof item.external_url === 'string' ? item.external_url : null,
     seo,
   };
 }
@@ -684,9 +728,75 @@ function isEditorUrl(url) {
   return url.startsWith('https://www.linkedin.com/article/') || url.startsWith('https://www.linkedin.com/pulse/');
 }
 
+// A LinkedIn article is live once its URL settles on the /pulse/<slug> permalink.
+// The editor (/article/new/) and the in-progress draft never match this, so a
+// later transition to a /pulse/ URL is a reliable "published" signal.
+function publishedLinkedInUrl(url) {
+  if (typeof url !== 'string') return null;
+  const match = url.match(/^https:\/\/www\.linkedin\.com\/pulse\/[^/?#]+/);
+  return match ? match[0] : null;
+}
+
+// Tabs we are watching for a publish navigation: tabId -> {contentId, platform, initialUrl}.
+// After the user clicks "Fill in editor" we keep an eye on that editor tab; when it
+// navigates to the live /pulse/ URL we auto-record the publication. Manual paste in
+// the popup remains the fallback when auto-capture cannot fire (popup-only flows,
+// edits of an existing article, or unexpected redirects).
+const publishWatch = new Map();
+
+function watchTabForPublish(tabId, contentId, platform, initialUrl) {
+  if (!tabId || !contentId || !platform) return;
+  publishWatch.set(tabId, { contentId, platform, initialUrl: initialUrl || '' });
+  log('[ContentPulse][bg] watching tab', tabId, 'for publish of content', contentId);
+}
+
+function cpPublishCapturedToast(message) {
+  try {
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:fixed;bottom:20px;right:20px;z-index:2147483647;padding:12px 16px;border-radius:8px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;background:#0a7d33;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:320px';
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  } catch (e) {}
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  const watch = publishWatch.get(tabId);
+  if (!watch) return;
+
+  const currentUrl = changeInfo.url || tab?.url || '';
+  const liveUrl = publishedLinkedInUrl(currentUrl);
+  // Ignore the editor and any URL identical to where we started filling; only a
+  // transition to a real /pulse/ permalink counts as published.
+  if (!liveUrl || currentUrl === watch.initialUrl) return;
+
+  publishWatch.delete(tabId);
+  const res = await recordPublication(watch.contentId, watch.platform, liveUrl);
+  if (res.ok) {
+    log('[ContentPulse][bg] auto-captured publish URL', liveUrl);
+    try {
+      chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: cpPublishCapturedToast,
+        args: ['ContentPulse: publish link saved to your workspace'],
+      });
+    } catch (e) {}
+  } else {
+    warn('[ContentPulse][bg] auto-capture could not save publish URL', res.error);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  publishWatch.delete(tabId);
+});
+
 function openAndFill(article) {
   const title = article?.title || '';
   const bodyHtml = article?.body_html || article?.body || '';
+  const contentId = article?.id || null;
+  const platform = article?.platform || 'linkedin_pulse';
   log('[ContentPulse][bg] openAndFill ->', title);
 
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -694,6 +804,7 @@ function openAndFill(article) {
 
     if (activeTab && isEditorUrl(activeTab.url)) {
       log('[ContentPulse][bg] active tab is already the editor, filling in place');
+      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url);
       pageFill(activeTab.id, title, bodyHtml, '');
       return;
     }
@@ -701,6 +812,7 @@ function openAndFill(article) {
     log('[ContentPulse][bg] no editor in the active tab, opening a new one');
     chrome.tabs.create({ url: LINKEDIN_EDITOR_URL }, (tab) => {
       const targetTabId = tab.id;
+      watchTabForPublish(targetTabId, contentId, platform, LINKEDIN_EDITOR_URL);
 
       const listener = (tabId, changeInfo) => {
         if (tabId !== targetTabId || changeInfo.status !== 'complete') {
@@ -763,6 +875,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'fillSeo':
       fillSeoActive(message.seo).then(sendResponse);
+      return true;
+
+    case 'recordPublication':
+      recordPublication(message.contentId, message.platform, message.remoteUrl).then(sendResponse);
       return true;
 
     default:

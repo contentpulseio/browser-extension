@@ -136,6 +136,26 @@
       <div id="platform-action" class="cp-card cp-platform-action"></div>
       <p id="detail-error" class="cp-error" hidden></p>
 
+      <div id="detail-publish-url-card" class="cp-card" hidden>
+        <div class="cp-field-label">Published link</div>
+        <p class="cp-help">
+          After you publish, this captures the live article URL automatically. If it didn't, paste the link here so
+          future articles can link back to it.
+        </p>
+        <input
+          id="published-url-input"
+          class="cp-input"
+          type="url"
+          inputmode="url"
+          placeholder="https://www.linkedin.com/pulse/your-article"
+          autocomplete="off"
+        />
+        <p id="publish-url-error" class="cp-error" hidden></p>
+        <div class="cp-copy-row">
+          <button id="save-published-url-btn" class="cp-btn cp-btn-primary cp-btn-sm">Save published link</button>
+        </div>
+      </div>
+
       <div id="detail-image-wrap" class="cp-card cp-detail-image-wrap" hidden>
         <div class="cp-field-label">Featured image</div>
         <img id="detail-image" class="cp-detail-image" alt="Featured image" />

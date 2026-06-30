@@ -472,6 +472,39 @@ function renderPlatformAction() {
   wrap.appendChild(note);
 
   updateFillButton();
+  renderPublishUrlCard();
+}
+
+// Maps a popup platform tab to the backend publication platform. Only the
+// extension-published, API-less channels (LinkedIn Pulse / Medium) accept a
+// recorded URL; CMS platforms publish via their own API so they are excluded.
+const PUBLISH_PLATFORM_MAP = { linkedin: 'linkedin_pulse', medium: 'medium' };
+
+function backendPlatformFor(platformId) {
+  return PUBLISH_PLATFORM_MAP[platformId] || null;
+}
+
+// Shows the "Published link" capture/paste card for channels we can record, and
+// prefills it with any URL already stored on the article.
+function renderPublishUrlCard() {
+  const card = $('detail-publish-url-card');
+  if (!card) return;
+
+  const backendPlatform = backendPlatformFor(selectedPlatform);
+  if (!backendPlatform) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  $('publish-url-error').hidden = true;
+  const input = $('published-url-input');
+  input.value = (selectedArticle && selectedArticle.external_url) || '';
+
+  const btn = $('save-published-url-btn');
+  btn.disabled = false;
+  btn.textContent = 'Save published link';
+  btn.classList.remove('cp-copied');
 }
 
 function updateFillButton() {
@@ -648,7 +681,12 @@ async function handleFill() {
   log('[ContentPulse][popup] fill ->', selectedArticle.title);
   const res = await sendMessage({
     action: 'openAndFill',
-    article: { title: selectedArticle.title, body_html: selectedArticle.body_html },
+    article: {
+      id: selectedArticle.id,
+      title: selectedArticle.title,
+      body_html: selectedArticle.body_html,
+      platform: backendPlatformFor(selectedPlatform) || 'linkedin_pulse',
+    },
   });
 
   if (res && res.ok) {
@@ -658,6 +696,57 @@ async function handleFill() {
     el.textContent = res?.error || 'Could not open the LinkedIn editor.';
     el.hidden = false;
   }
+}
+
+async function handleSavePublishedUrl() {
+  if (!selectedArticle) return;
+
+  const input = $('published-url-input');
+  const errEl = $('publish-url-error');
+  const btn = $('save-published-url-btn');
+  errEl.hidden = true;
+
+  const remoteUrl = (input.value || '').trim();
+  const backendPlatform = backendPlatformFor(selectedPlatform);
+
+  if (!backendPlatform) {
+    errEl.textContent = 'This platform does not support saving a published link.';
+    errEl.hidden = false;
+    return;
+  }
+  if (remoteUrl === '') {
+    errEl.textContent = 'Paste the live article URL first.';
+    errEl.hidden = false;
+    return;
+  }
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const res = await sendMessage({
+    action: 'recordPublication',
+    contentId: selectedArticle.id,
+    platform: backendPlatform,
+    remoteUrl,
+  });
+
+  btn.disabled = false;
+
+  if (res && res.ok) {
+    selectedArticle.external_url = selectedArticle.external_url || remoteUrl;
+    btn.textContent = 'Saved ✓';
+    btn.classList.add('cp-copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('cp-copied');
+    }, 1600);
+    return;
+  }
+
+  btn.textContent = original;
+  errEl.textContent = res?.error || 'Could not save the published link. Please check the URL and try again.';
+  errEl.hidden = false;
 }
 
 async function handleFillSeo() {
@@ -740,6 +829,7 @@ async function init() {
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
   $('fill-seo-btn').addEventListener('click', handleFillSeo);
+  $('save-published-url-btn').addEventListener('click', handleSavePublishedUrl);
   $('download-image-btn').addEventListener('click', handleDownloadImage);
   $('copy-image-url').addEventListener('click', handleCopyImageUrl);
   $('manage-btn').addEventListener('click', handleManage);
