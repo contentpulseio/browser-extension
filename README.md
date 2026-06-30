@@ -1,20 +1,18 @@
 # ContentPulse Publisher
 
-A Chrome (Manifest V3) browser extension that brings the articles your team has
-written and reviewed in your [ContentPulse](https://contentpulse.io) workspace
-into your publishing editor. Fill the LinkedIn Article editor in one click, then
-review and publish — or copy the formatted / HTML version into your editor by
-hand.
+A Chrome (Manifest V3) browser extension that pushes AI‑written, SEO‑ready
+articles from your [ContentPulse](https://contentpulse.io) workspace straight
+into a publishing editor. Fill the LinkedIn Article editor in one click, or copy
+the formatted / HTML version to paste anywhere.
 
 ![Onboarding](docs/onboarding.png)
 
 ## Features
 
-- **One‑click fill** — the title, body, headings, links & featured image are placed into your editor.
-- **Your reviewed articles in reach** — pull the scheduled & in‑review pieces from your workspace, no copy‑paste.
-- **Metadata travels** — meta title, description, keywords & featured image come along with each article.
-- **You stay in control** — you review every article and click publish yourself; it fills one editor at a time and never posts on its own.
-- **AI writing helpers** — draft, rewrite & polish your articles back in ContentPulse before you publish.
+- **AI content, ready to ship** — pull scheduled & in‑review articles from your workspace.
+- **One‑click fill** — title, body, headings, links & images dropped into the editor.
+- **SEO built in** — meta title, description, keywords & featured image come along.
+- **Reliable backup** — if an auto‑publish integration ever fails, copy formatted or HTML and paste into any platform.
 
 ## Install (unpacked / development)
 
@@ -40,13 +38,12 @@ review its details before publishing.
 
 ### 3. Review and publish
 
-The detail view shows the title, body, metadata, and featured image. From
+The detail view shows the title, body, SEO metadata, and featured image. From
 here you can:
 
 - **Fill in editor** — open the target editor (e.g. a LinkedIn Article) and the
   extension fills the title and formatted body automatically.
-- **Copy formatted** / **Copy HTML** — paste into your editor by hand as an
-  alternative.
+- **Copy formatted** / **Copy HTML** — paste into any other platform as a fallback.
 
 ![Article detail](docs/detail.png)
 
