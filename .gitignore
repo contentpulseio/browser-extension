@@ -8,3 +8,7 @@ node_modules/
 .DS_Store
 *.log
 Thumbs.db
+
+# Chrome Web Store submission scratch (listing copy + upload-sized art) — local only
+docs/setup.md
+docs/store/
