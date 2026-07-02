@@ -33,6 +33,16 @@ body {
   background: var(--cp-bg);
 }
 
+/* Inside the in-page LinkedIn panel the iframe dictates the width, and the
+   panel shell already shows the brand header. */
+.cp-embedded body {
+  width: auto;
+}
+
+.cp-embedded .cp-header {
+  display: none;
+}
+
 .cp-header {
   display: flex;
   align-items: center;
@@ -105,37 +115,14 @@ body {
   border-radius: 10px;
   border: 1px solid var(--cp-border);
   object-fit: cover;
-  max-height: 200px;
+  max-height: 150px;
   background: #eef2f6;
 }
 
-.cp-tabbar {
+.cp-list-actions {
   display: flex;
-  gap: 4px;
-  padding: 8px 12px 0;
-  background: var(--cp-card);
-  border-bottom: 1px solid var(--cp-border);
-}
-
-.cp-tab {
-  flex: 1;
-  padding: 9px 12px;
-  border: none;
-  background: none;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--cp-muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.cp-tab:hover {
-  color: var(--cp-text);
-}
-
-.cp-tab-active {
-  color: var(--cp-accent);
-  border-bottom-color: var(--cp-accent);
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .cp-help {
@@ -183,10 +170,10 @@ body {
 }
 
 .cp-screen {
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .cp-screen[hidden] {
@@ -352,20 +339,60 @@ body {
   background: #eef2f6;
 }
 
+/* Central boot loader shown until account + websites + articles are ready. */
+.cp-boot {
+  min-height: 320px;
+  align-items: center;
+  justify-content: center;
+}
+
+.cp-boot-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.cp-boot-logo {
+  border-radius: 9px;
+}
+
+.cp-boot-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid rgba(124, 58, 237, 0.18);
+  border-top-color: var(--cp-accent);
+  animation: cp-spin 0.8s linear infinite;
+}
+
+.cp-boot-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cp-muted);
+}
+
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .cp-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
+/* Compact single-row card: thumb | title + meta | Publish button. */
 .cp-article-card {
   background: var(--cp-card);
   border: 1px solid var(--cp-border);
   border-radius: 10px;
-  padding: 12px;
+  padding: 8px 10px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
@@ -376,15 +403,9 @@ body {
   border-color: #d3dae2;
 }
 
-.cp-article-main {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
 .cp-article-thumb {
-  width: 56px;
-  height: 56px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
@@ -397,25 +418,32 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.cp-article-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
+  gap: 4px;
 }
 
 .cp-article-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .cp-article-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--cp-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cp-article-publish {
+  width: auto;
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .cp-badge {
@@ -473,9 +501,13 @@ body {
 
 .cp-excerpt {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: #374151;
   line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .cp-card {
@@ -483,6 +515,26 @@ body {
   border: 1px solid var(--cp-border);
   border-radius: 10px;
   padding: 12px;
+  /* Consistent breathing room between a card's label, help text, and rows. */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cp-card[hidden] {
+  display: none;
+}
+
+.cp-card .cp-help {
+  margin: 0;
+}
+
+.cp-card .cp-copy-row {
+  margin-top: 2px;
+}
+
+.cp-card .cp-share-post-box {
+  margin-top: 0;
 }
 
 .cp-field-label {
@@ -509,8 +561,53 @@ body {
   font-weight: 500;
 }
 
+.cp-seo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Card header: small-caps label left, compact action buttons right. */
+.cp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cp-card-head .cp-btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.cp-btn-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cp-btn-cluster .cp-btn {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.cp-seo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cp-seo-head .cp-btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .cp-seo-row {
-  margin-top: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cp-border);
 }
 
 .cp-seo-key {
@@ -523,7 +620,7 @@ body {
 }
 
 .cp-seo-val {
-  font-size: 13px;
+  font-size: 12px;
   color: #374151;
   line-height: 1.45;
   word-break: break-word;
@@ -547,41 +644,40 @@ body {
 }
 
 .cp-onboarding {
-  gap: 16px;
-  padding: 20px 18px 22px;
+  gap: 12px;
+  padding: 14px 16px 16px;
 }
 
 .cp-hero {
-  text-align: center;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 4px 4px;
+  gap: 6px;
+  padding: 2px 0;
 }
 
-.cp-hero-logo {
-  width: 56px;
-  height: 56px;
+.cp-hero-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.16), rgba(124, 58, 237, 0.16));
+  gap: 10px;
+}
+
+.cp-hero-logo-img {
+  border-radius: 8px;
+  flex-shrink: 0;
 }
 
 .cp-hero-title {
-  margin: 4px 0 0;
-  font-size: 19px;
+  margin: 0;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.25;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
 }
 
 .cp-hero-sub {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--cp-muted);
 }
 
@@ -592,6 +688,31 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Compact 2x2 chip grid used on the connect screen. */
+.cp-features-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.cp-features-grid .cp-feature {
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 9px;
+  background: var(--cp-card);
+  font-size: 12px;
+}
+
+.cp-features-grid .cp-feature-ico {
+  width: auto;
+  height: auto;
+  background: none;
+  border-radius: 0;
+  font-size: 14px;
 }
 
 .cp-feature {
@@ -713,16 +834,35 @@ body {
 .cp-connect-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
   background: var(--cp-card);
   border: 1px solid var(--cp-border);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
+/* API key input and Connect button share one row. */
+.cp-connect-row {
+  display: flex;
+  gap: 8px;
+}
+
+.cp-connect-row .cp-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.cp-connect-row .cp-btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 .cp-connect-card .cp-link {
   text-align: left;
+  font-size: 12px;
 }
 
 .cp-connect-card .cp-label {
@@ -732,34 +872,44 @@ body {
 }
 
 .cp-promo {
-  text-align: center;
+  text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
   background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(124, 58, 237, 0.1));
   border: 1px solid rgba(124, 58, 237, 0.18);
 }
 
+.cp-promo-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .cp-promo-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .cp-promo-sub {
   margin: 0;
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--cp-muted);
 }
 
 .cp-promo-actions {
   display: flex;
-  flex-direction: column;
   gap: 8px;
-  margin-top: 2px;
+}
+
+.cp-promo-actions .cp-btn {
+  flex: 1 1 0;
+  width: auto;
+  text-align: center;
 }
 
 .cp-legal {
@@ -818,6 +968,23 @@ body {
   font-size: 11px;
 }
 
+/* Prepared LinkedIn share post preview: boxed and scrollable so long copy
+   never crowds the card, with clear separation from the help text above. */
+.cp-share-post-box {
+  margin-top: 10px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--cp-border);
+  border-radius: 8px;
+  background: var(--cp-bg);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--cp-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .cp-copy-row {
   display: flex;
   flex-wrap: wrap;
@@ -837,63 +1004,6 @@ body {
   gap: 8px;
 }
 
-.cp-platform-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.cp-platform-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 11px;
-  border: 1px solid var(--cp-border);
-  border-radius: 999px;
-  background: var(--cp-card);
-  color: var(--cp-muted);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.cp-platform-tab-icon {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  display: block;
-  object-fit: contain;
-}
-
-.cp-platform-tab:hover {
-  color: var(--cp-text);
-  border-color: rgba(124, 58, 237, 0.35);
-}
-
-.cp-platform-tab-active {
-  color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--cp-accent), var(--cp-accent2));
-}
-
-.cp-platform-live-dot {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
-
-.cp-platform-tab:not(.cp-platform-tab-active) .cp-platform-live-dot {
-  background: rgba(16, 185, 129, 0.15);
-  color: #059669;
-}
-
 .cp-platform-action {
   display: flex;
   flex-direction: column;
@@ -910,16 +1020,143 @@ body {
 
 .cp-detail-actions {
   display: flex;
+  align-items: stretch;
   gap: 8px;
 }
 
+/* Compact left-aligned actions; Manage stays a quiet ghost button. */
 .cp-detail-actions .cp-btn {
-  flex: 1;
+  width: auto;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.cp-meta-text {
+  font-size: 12px;
+  color: var(--cp-muted);
+}
+
+/* Settings: one card with inline rows instead of stacked cards + big buttons. */
+.cp-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.cp-settings-row .cp-btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.cp-settings-info {
+  min-width: 0;
+}
+
+.cp-divider {
+  border: none;
+  border-top: 1px solid var(--cp-border);
+  margin: 2px 0;
+  width: 100%;
+}
+
+.cp-settings-disconnect {
+  width: auto;
+  align-self: flex-start;
+}
+
+/* In-extension confirm dialog (replaces window.confirm, which is blocked in
+   the embedded LinkedIn panel). */
+.cp-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 12, 41, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.cp-confirm-box {
+  width: 100%;
+  max-width: 300px;
+  background: var(--cp-card, #fff);
+  border: 1px solid var(--cp-border, #e5e2f0);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 18px 40px rgba(15, 12, 41, 0.25);
+}
+
+.cp-confirm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cp-text, #1c1830);
+  margin-bottom: 6px;
+}
+
+.cp-confirm-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cp-muted, #6b6787);
+  margin: 0 0 14px;
+}
+
+.cp-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cp-confirm-actions .cp-btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+/* Small round "i" toggle explaining what Fill in editor does. */
+.cp-info-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  border: 1px solid var(--cp-border);
+  border-radius: 8px;
+  background: var(--cp-card);
+  color: var(--cp-muted);
+  font-size: 13px;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cp-info-btn:hover {
+  color: var(--cp-accent);
+  border-color: rgba(124, 58, 237, 0.35);
 }
 
 .cp-detail-head {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.cp-detail-head .cp-title {
+  font-size: 14px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Top row: status badge + word count on the left, quiet copy on the right. */
+.cp-detail-metabar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
 }
 
@@ -927,11 +1164,55 @@ body {
   margin: 0;
 }
 
-.cp-list-header {
+/* Detail screen internal tabs (Publish / Content / SEO) - light underline
+   tabs, so they no longer compete visually with the action buttons above. */
+.cp-detail-tabs {
   display: flex;
-  align-items: flex-start;
+  gap: 2px;
+  border-bottom: 1px solid var(--cp-border);
+}
+
+.cp-detail-tab {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cp-detail-tab:hover {
+  color: var(--cp-text);
+}
+
+.cp-detail-tab-active,
+.cp-detail-tab-active:hover {
+  color: var(--cp-accent);
+  border-bottom-color: var(--cp-accent);
+  background: none;
+}
+
+.cp-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cp-detail-panel[hidden] {
+  display: none;
+}
+
+.cp-list-header {
+  flex-direction: row;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding: 10px 12px;
 }
 
 .cp-list-heading {

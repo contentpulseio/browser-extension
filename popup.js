@@ -8,24 +8,27 @@ const warn = (...args) => {
   if (CP_DEBUG) console.warn(...args);
 };
 
-const SCREENS = ['screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings'];
+const SCREENS = ['screen-boot', 'screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings'];
 
 const APP_BASE_URL = 'https://app.contentpulse.io';
+
+// True when this page runs inside the in-page LinkedIn panel (iframe injected
+// by panel.js) instead of the toolbar popup.
+const IS_EMBEDDED = new URLSearchParams(location.search).has('embedded');
+
+// The toolbar popup closes itself after a successful fill; the in-page panel
+// exists precisely so the user can keep it open, so it stays.
+function closeUi() {
+  if (!IS_EMBEDDED) window.close();
+}
+
+if (IS_EMBEDDED) document.documentElement.classList.add('cp-embedded');
 
 function showScreen(id) {
   log('[ContentPulse][popup] show screen', id);
   for (const s of SCREENS) {
     $(s).hidden = s !== id;
   }
-}
-
-function setTabbarVisible(visible) {
-  $('tabbar').hidden = !visible;
-}
-
-function setActiveTab(tab) {
-  $('tab-list').classList.toggle('cp-tab-active', tab === 'list');
-  $('tab-settings').classList.toggle('cp-tab-active', tab === 'settings');
 }
 
 const CONNECTION_ERROR_HINTS = [
@@ -36,30 +39,68 @@ const CONNECTION_ERROR_HINTS = [
 
 function sendOnce(message) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve({ ok: false, status: 0, error: chrome.runtime.lastError.message, _connError: true });
-        return;
-      }
-      resolve(response);
-    });
+    // chrome.runtime.sendMessage THROWS synchronously with "Extension context
+    // invalidated" when this page outlived an extension reload - typical for
+    // the embedded LinkedIn panel, which stays open across updates.
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, status: 0, error: chrome.runtime.lastError.message, _connError: true });
+          return;
+        }
+        resolve(response);
+      });
+    } catch (e) {
+      resolve({ ok: false, status: 0, error: e.message, _ctxInvalidated: true });
+    }
   });
 }
 
 async function sendMessage(message, attempts = 3) {
   for (let i = 0; i < attempts; i += 1) {
     const res = await sendOnce(message);
+    if (res && res._ctxInvalidated) {
+      // Inline on purpose: in an invalidated (orphaned) extension context,
+      // even same-file function bindings can already be gone, so calling a
+      // helper here throws ReferenceError. Reload the document to reattach.
+      try {
+        setTimeout(() => window.location.reload(), 600);
+      } catch (e) {}
+      return { ok: false, status: 0, error: 'The extension was updated - reloading this panel…' };
+    }
     const isConnError =
       res &&
       res._connError &&
       CONNECTION_ERROR_HINTS.some((h) => (res.error || '').toLowerCase().includes(h.toLowerCase()));
     if (!isConnError) {
+      if (res && res.ok === false && /^Unknown action:/.test(res.error || '')) {
+        return handleStaleWorker(res);
+      }
       return res;
     }
     warn(`[ContentPulse][popup] worker not ready (attempt ${i + 1}/${attempts}), retrying…`);
     await new Promise((r) => setTimeout(r, 150 * (i + 1)));
   }
   return { ok: false, status: 0, error: 'Background service worker did not respond. Try again.' };
+}
+
+// "Unknown action" means the running background service worker predates this
+// popup (Chrome re-reads popup.js on every open, but keeps the old worker until
+// the extension is reloaded - common with unpacked installs after an update).
+// Self-heal by reloading the extension so the fresh background.js is picked up.
+// Throttled so a genuinely missing handler can never cause a reload loop.
+async function handleStaleWorker(res) {
+  const RELOAD_THROTTLE_MS = 60_000;
+  const { lastStaleReloadAt } = await new Promise((resolve) =>
+    chrome.storage.local.get(['lastStaleReloadAt'], resolve),
+  );
+  if (!lastStaleReloadAt || Date.now() - lastStaleReloadAt > RELOAD_THROTTLE_MS) {
+    await new Promise((resolve) => chrome.storage.local.set({ lastStaleReloadAt: Date.now() }, resolve));
+    warn('[ContentPulse][popup] stale background worker detected, reloading extension');
+    setTimeout(() => chrome.runtime.reload(), 300);
+    return { ok: false, status: 0, error: 'Extension was just updated - please reopen the popup and try again.' };
+  }
+  return res;
 }
 
 function getStored(keys) {
@@ -161,6 +202,11 @@ function selectedWebsiteName() {
   return match ? match.name : '';
 }
 
+function selectedWebsiteLinkedInAuthor() {
+  const match = websites.find((w) => w.id === selectedWebsiteId);
+  return match?.linkedin_author || '';
+}
+
 function creditCaption() {
   if (!selectedArticle) return '';
   const caption = selectedArticle.title || '';
@@ -169,11 +215,14 @@ function creditCaption() {
 }
 
 async function enterConnectedShell() {
-  setTabbarVisible(true);
-  showTab('list');
+  // One central loader; the queue only appears once account, websites AND
+  // articles are all ready, instead of the page building up in stages.
+  showScreen('screen-boot');
   await refreshAccount();
   await loadWebsites();
   await loadArticles(selectedWebsiteId);
+  if (!$('screen-onboarding').hidden) return; // session expired during boot
+  showTab('list');
 }
 
 function renderAccountBar(tenant) {
@@ -238,13 +287,11 @@ async function handleWebsiteChange() {
 }
 
 function enterDisconnectedShell() {
-  setTabbarVisible(false);
   $('account-bar').hidden = true;
   showScreen('screen-onboarding');
 }
 
 function showTab(tab) {
-  setActiveTab(tab);
   if (tab === 'settings') {
     renderSettings();
     showScreen('screen-settings');
@@ -330,12 +377,10 @@ function renderArticleList() {
   }
   $('list-empty').hidden = true;
 
+  // Compact single-row cards: thumb | title + meta (status inline) | Publish.
   for (const article of currentArticles) {
     const card = document.createElement('div');
     card.className = 'cp-article-card';
-
-    const main = document.createElement('div');
-    main.className = 'cp-article-main';
 
     if (article.image_url) {
       const thumb = document.createElement('img');
@@ -345,44 +390,43 @@ function renderArticleList() {
       thumb.loading = 'lazy';
 
       thumb.addEventListener('error', () => thumb.remove());
-      main.appendChild(thumb);
+      card.appendChild(thumb);
     }
 
     const info = document.createElement('div');
     info.className = 'cp-article-info';
 
-    const top = document.createElement('div');
-    top.className = 'cp-article-top';
-
     const title = document.createElement('div');
     title.className = 'cp-article-title';
     title.textContent = article.title;
+    title.title = article.title;
+
+    const meta = document.createElement('div');
+    meta.className = 'cp-article-meta';
 
     const badge = document.createElement('span');
     badge.className = `cp-badge ${statusColor(article.status)}`;
     badge.textContent = article.status;
+    meta.appendChild(badge);
 
-    top.appendChild(title);
-    top.appendChild(badge);
-
-    const meta = document.createElement('div');
-    meta.className = 'cp-article-meta';
+    // The status badge already reads "scheduled"; just show the date itself.
     const date = formatDate(article.scheduled_date);
-    meta.textContent = date ? `Scheduled ${date}` : 'Not scheduled';
+    const when = document.createElement('span');
+    when.textContent = date || 'Not scheduled';
+    meta.appendChild(when);
 
-    info.appendChild(top);
+    info.appendChild(title);
     info.appendChild(meta);
-    main.appendChild(info);
+    card.appendChild(info);
 
     const btn = document.createElement('button');
-    btn.className = 'cp-btn cp-btn-primary cp-btn-sm cp-btn-block';
+    btn.className = 'cp-btn cp-btn-primary cp-btn-sm cp-article-publish';
     btn.textContent = 'Publish';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       openDetail(article);
     });
 
-    card.appendChild(main);
     card.appendChild(btn);
     card.addEventListener('click', () => openDetail(article));
 
@@ -390,17 +434,30 @@ function renderArticleList() {
   }
 }
 
+// Internal tabs of the detail screen (Publish / Content / SEO). The old layout
+// stacked every card vertically, which made the popup a long scroll; tabs keep
+// it compact and grouped by intent.
+const DETAIL_TABS = ['publish', 'content', 'seo'];
+
+function showDetailTab(tab) {
+  for (const t of DETAIL_TABS) {
+    $(`dtab-${t}`).hidden = t !== tab;
+    $(`dtab-btn-${t}`).classList.toggle('cp-detail-tab-active', t === tab);
+  }
+}
+
 function openDetail(article) {
   selectedArticle = article;
   selectedPlatform = (PLATFORMS.find((p) => p.live) || PLATFORMS[0]).id;
   $('detail-error').hidden = true;
+  showDetailTab('publish');
 
   const text = article.excerpt && article.excerpt.trim() !== '' ? article.excerpt : htmlToText(article.body_html);
   const excerpt = text.length > 200 ? `${text.slice(0, 200)}…` : text;
 
   $('detail-title').textContent = article.title;
   $('detail-excerpt').textContent = excerpt || 'No preview available.';
-  $('detail-wordcount').textContent = `${wordCount(htmlToText(article.body_html))} words`;
+  $('detail-wordcount').textContent = `${wordCount(htmlToText(article.body_html)).toLocaleString()} words`;
   const statusBadge = $('detail-status');
   statusBadge.textContent = article.status;
   statusBadge.className = `cp-badge ${statusColor(article.status)}`;
@@ -428,35 +485,19 @@ function openDetail(article) {
   showScreen('screen-detail');
 }
 
+// The platform picker is a select box (was a row of pill tabs) so the list can
+// grow without crowding the popup. Live platforms are marked; the rest read as
+// coming soon.
 function renderPlatformTabs() {
-  const tabs = $('platform-tabs');
-  tabs.innerHTML = '';
+  const select = $('platform-select');
+  select.innerHTML = '';
   for (const platform of PLATFORMS) {
-    const btn = document.createElement('button');
-    btn.className = 'cp-platform-tab';
-    btn.classList.toggle('cp-platform-tab-active', platform.id === selectedPlatform);
-    btn.dataset.platform = platform.id;
-    if (platform.icon) {
-      const icon = document.createElement('img');
-      icon.src = platform.icon;
-      icon.alt = '';
-      icon.className = 'cp-platform-tab-icon';
-      btn.appendChild(icon);
-    }
-    btn.appendChild(document.createTextNode(platform.name));
-    if (platform.live) {
-      const dot = document.createElement('span');
-      dot.className = 'cp-platform-live-dot';
-      dot.textContent = 'Live';
-      btn.appendChild(dot);
-    }
-    btn.addEventListener('click', () => {
-      selectedPlatform = platform.id;
-      renderPlatformTabs();
-      renderPlatformAction();
-    });
-    tabs.appendChild(btn);
+    const option = document.createElement('option');
+    option.value = platform.id;
+    option.textContent = platform.live ? `${platform.name} — Live` : `${platform.name} (coming soon)`;
+    select.appendChild(option);
   }
+  select.value = selectedPlatform;
 }
 
 function renderPlatformAction() {
@@ -464,15 +505,94 @@ function renderPlatformAction() {
   wrap.innerHTML = '';
   const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
 
-  const note = document.createElement('p');
-  note.className = 'cp-help' + (platform.live ? '' : ' cp-platform-soon');
-  note.textContent = platform.live
-    ? `"Fill in editor" drops the title and body into ${platform.name}. Copy the SEO and credit/caption below into their fields.`
-    : `Direct fill for ${platform.name} is coming soon.`;
-  wrap.appendChild(note);
+  // Live platforms explain themselves via the "i" button next to Fill in
+  // editor; the inline card only appears for coming-soon platforms.
+  if (platform.live) {
+    wrap.hidden = true;
+  } else {
+    const note = document.createElement('p');
+    note.className = 'cp-help cp-platform-soon';
+    note.textContent = `Direct fill for ${platform.name} is coming soon.`;
+    wrap.appendChild(note);
+    wrap.hidden = false;
+  }
+
+  $('fill-info-text').textContent =
+    `"Fill in editor" drops the title, body and cover image into ${platform.name}, and checks the right profile/page is selected. The Content and SEO tabs hold everything to copy.`;
+  $('fill-info-text').hidden = true;
 
   updateFillButton();
+  renderSharePostCard();
   renderPublishUrlCard();
+}
+
+// LinkedIn forces a share post when a Pulse article is published. Show the
+// backend-prepared copy (commentary + hashtags) so the user can paste it into
+// the share dialog instead of writing one on the spot.
+function renderSharePostCard() {
+  const card = $('detail-share-post-card');
+  if (!card) return;
+
+  const post = selectedArticle && selectedArticle.share_post;
+  if (selectedPlatform !== 'linkedin' || !post) {
+    card.hidden = true;
+    return;
+  }
+
+  $('share-post-text').textContent = composeSharePostText(post);
+  $('share-post-error').hidden = true;
+  card.hidden = false;
+}
+
+function composeSharePostText(post) {
+  const parts = [(post.commentary || '').trim()];
+  const tags = (post.hashtags || '').trim();
+  if (tags !== '') {
+    parts.push('', tags);
+  }
+  return parts.join('\n').trim();
+}
+
+async function handleCopySharePost() {
+  const post = selectedArticle && selectedArticle.share_post;
+  if (!post) return;
+  const ok = await copyPlainText(composeSharePostText(post));
+  if (ok) flashCopied($('copy-share-post-btn'));
+}
+
+// Fills LinkedIn's share dialog in the active tab with the prepared text.
+// The automatic fill armed by "Fill in editor" covers the normal flow; this
+// button is the manual fallback (e.g. popup-only usage or a missed dialog).
+async function handleFillSharePost() {
+  const post = selectedArticle && selectedArticle.share_post;
+  if (!post) return;
+
+  const errEl = $('share-post-error');
+  errEl.hidden = true;
+
+  const btn = $('fill-share-post-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Filling…';
+
+  const res = await sendMessage({ action: 'fillSharePost', sharePost: post });
+
+  btn.disabled = false;
+
+  if (res && res.ok) {
+    btn.textContent = 'Filled ✓';
+    btn.classList.add('cp-copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('cp-copied');
+    }, 1600);
+    return;
+  }
+
+  btn.textContent = original;
+  errEl.textContent =
+    res?.error || 'Could not fill the share dialog. Open it on LinkedIn (click Publish on the article) and try again.';
+  errEl.hidden = false;
 }
 
 // Maps a popup platform tab to the backend publication platform. Only the
@@ -498,6 +618,8 @@ function renderPublishUrlCard() {
 
   card.hidden = false;
   $('publish-url-error').hidden = true;
+  $('pulse-url-notice').hidden = true;
+  $('use-pulse-url-btn').hidden = true;
   const input = $('published-url-input');
   input.value = (selectedArticle && selectedArticle.external_url) || '';
 
@@ -671,7 +793,9 @@ function renderSeo(seo) {
     }
   }
 
-  card.hidden = !(hasTitle || hasDesc || hasSlug || hasKeywords);
+  const hasAny = hasTitle || hasDesc || hasSlug || hasKeywords;
+  card.hidden = !hasAny;
+  $('seo-empty').hidden = hasAny;
 }
 
 async function handleFill() {
@@ -686,16 +810,53 @@ async function handleFill() {
       title: selectedArticle.title,
       body_html: selectedArticle.body_html,
       platform: backendPlatformFor(selectedPlatform) || 'linkedin_pulse',
+      // Needed by the background to arm the share-dialog auto-fill.
+      share_post: selectedArticle.share_post || null,
+      // Connected LinkedIn profile/page of the article's website - the
+      // background checks the editor's "Publish as" selector against it.
+      publish_as: selectedWebsiteLinkedInAuthor(),
+      // Featured image - dropped into LinkedIn's cover image input.
+      image_url: selectedArticle.image_url || null,
+      // Filled into the cover's "Add credit and caption" field after the image.
+      credit: creditCaption(),
+      // SEO title/description - filled into the editor's Settings panel and
+      // saved as the last step of the automated chain.
+      seo: selectedArticle.seo
+        ? {
+            meta_title: selectedArticle.seo.meta_title || '',
+            meta_description: selectedArticle.seo.meta_description || '',
+          }
+        : null,
     },
   });
 
   if (res && res.ok) {
-    window.close();
+    closeUi();
   } else {
     const el = $('detail-error');
     el.textContent = res?.error || 'Could not open the LinkedIn editor.';
     el.hidden = false;
   }
+}
+
+// Kicks off LinkedIn's own scheduling flow on the open editor tab: clicks the
+// editor's top-nav Next, then the clock ("Schedule post") button in the share
+// dialog. The user picks the date/time in LinkedIn's picker.
+async function handleSchedule() {
+  $('detail-error').hidden = true;
+
+  const res = await sendMessage({
+    action: 'schedulePost',
+    scheduledAt: (selectedArticle && selectedArticle.scheduled_date) || null,
+  });
+
+  if (res && res.ok) {
+    closeUi();
+    return;
+  }
+  const el = $('detail-error');
+  el.textContent = res?.error || 'Could not start the schedule flow. Open the LinkedIn editor tab first.';
+  el.hidden = false;
 }
 
 async function handleSavePublishedUrl() {
@@ -784,13 +945,77 @@ async function handleFillSeo() {
       btn.textContent = original;
       btn.classList.remove('cp-copied');
     }, 1600);
+    if (res.pulseUrl) offerPulseUrl(res.pulseUrl);
     return;
   }
 
   btn.textContent = original;
   const el = $('detail-error');
   el.textContent =
-    res?.error || 'Could not fill the SEO fields. Open the LinkedIn article editor and its Settings (SEO) panel, then try again.';
+    res?.error || 'Could not fill the SEO fields. Open the LinkedIn article editor, then try again.';
+  el.hidden = false;
+}
+
+// The SEO fill also creates/reads the article's permanent pulse URL. Feed it
+// into the Published link card: prefill when empty, or warn (with a one-click
+// "Use new URL" button) when it differs from what is already there.
+function offerPulseUrl(pulseUrl) {
+  const input = $('published-url-input');
+  const notice = $('pulse-url-notice');
+  const useBtn = $('use-pulse-url-btn');
+  const current = (input.value || '').trim();
+
+  notice.hidden = true;
+  useBtn.hidden = true;
+
+  if (current === pulseUrl) return;
+
+  if (current === '') {
+    input.value = pulseUrl;
+    notice.textContent = 'URL captured from LinkedIn - click "Save published link" to store it.';
+    notice.hidden = false;
+  } else {
+    notice.textContent = `LinkedIn now reports a different URL: ${pulseUrl} - do you want to change it?`;
+    notice.hidden = false;
+    useBtn.hidden = false;
+    useBtn.onclick = () => {
+      input.value = pulseUrl;
+      useBtn.hidden = true;
+      notice.textContent = 'URL replaced - click "Save published link" to store it.';
+    };
+  }
+
+  // The card lives in the Publish tab; make the prompt visible right away.
+  showDetailTab('publish');
+}
+
+async function handleFillImage() {
+  if (!selectedArticle || !selectedArticle.image_url) return;
+  $('fill-image-error').hidden = true;
+
+  const btn = $('fill-image-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Filling…';
+
+  log('[ContentPulse][popup] fill cover image ->', selectedArticle.title);
+  const res = await sendMessage({ action: 'fillCoverImage', imageUrl: selectedArticle.image_url, credit: creditCaption() });
+
+  btn.disabled = false;
+
+  if (res && res.ok) {
+    btn.textContent = 'Filled ✓';
+    btn.classList.add('cp-copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('cp-copied');
+    }, 1600);
+    return;
+  }
+
+  btn.textContent = original;
+  const el = $('fill-image-error');
+  el.textContent = res?.error || 'Could not fill the cover image. Open the LinkedIn article editor, then try again.';
   el.hidden = false;
 }
 
@@ -801,7 +1026,51 @@ async function renderSettings() {
   $('settings-key').textContent = apiKey ? `••••••••${apiKey.slice(-4)}` : 'Not set';
 }
 
+// In-extension confirm dialog (window.confirm/alert are blocked or ugly in the
+// embedded panel). Resolves true on confirm, false on cancel/Escape/backdrop.
+function showConfirm({ title, text, okLabel = 'Continue', danger = true }) {
+  return new Promise((resolve) => {
+    const overlay = $('cp-confirm-overlay');
+    const okBtn = $('cp-confirm-ok');
+    const cancelBtn = $('cp-confirm-cancel');
+    $('cp-confirm-title').textContent = title;
+    $('cp-confirm-text').textContent = text;
+    okBtn.textContent = okLabel;
+    okBtn.classList.toggle('cp-btn-danger', danger);
+    okBtn.classList.toggle('cp-btn-primary', !danger);
+    overlay.hidden = false;
+
+    const done = (result) => {
+      overlay.hidden = true;
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+    const onOk = () => done(true);
+    const onCancel = () => done(false);
+    const onBackdrop = (e) => {
+      if (e.target === overlay) done(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') done(false);
+    };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    cancelBtn.focus();
+  });
+}
+
 async function handleChangeKey() {
+  const confirmed = await showConfirm({
+    title: 'Change API key?',
+    text: 'You will be taken back to the connect screen and signed out of this session. You will need to enter a valid API key to get back in.',
+    okLabel: 'Change key',
+  });
+  if (!confirmed) return;
   log('[ContentPulse][popup] change API key (no reset until a new key is saved)');
   $('api-key-input').value = '';
   showOnboardingError('');
@@ -809,7 +1078,11 @@ async function handleChangeKey() {
 }
 
 async function handleDisconnect() {
-  const confirmed = window.confirm('Disconnect ContentPulse? You will need to re-enter your API key.');
+  const confirmed = await showConfirm({
+    title: 'Disconnect ContentPulse?',
+    text: 'This signs you out and removes the stored API key. You will need to re-enter your API key to reconnect.',
+    okLabel: 'Disconnect',
+  });
   if (!confirmed) return;
   log('[ContentPulse][popup] disconnect');
   await clearStored();
@@ -824,12 +1097,27 @@ async function init() {
   });
   $('refresh-btn').addEventListener('click', () => loadArticles(selectedWebsiteId));
   $('website-select').addEventListener('change', handleWebsiteChange);
-  $('tab-list').addEventListener('click', () => showTab('list'));
-  $('tab-settings').addEventListener('click', () => showTab('settings'));
+  $('settings-btn').addEventListener('click', () => showTab('settings'));
+  $('settings-back-btn').addEventListener('click', () => showTab('list'));
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
+  $('schedule-btn').addEventListener('click', handleSchedule);
   $('fill-seo-btn').addEventListener('click', handleFillSeo);
   $('save-published-url-btn').addEventListener('click', handleSavePublishedUrl);
+  $('copy-share-post-btn').addEventListener('click', handleCopySharePost);
+  $('fill-share-post-btn').addEventListener('click', handleFillSharePost);
+  $('platform-select').addEventListener('change', (e) => {
+    selectedPlatform = e.target.value;
+    renderPlatformAction();
+  });
+  for (const tab of DETAIL_TABS) {
+    $(`dtab-btn-${tab}`).addEventListener('click', () => showDetailTab(tab));
+  }
+  $('fill-info-btn').addEventListener('click', () => {
+    const info = $('fill-info-text');
+    info.hidden = !info.hidden;
+  });
+  $('fill-image-btn').addEventListener('click', handleFillImage);
   $('download-image-btn').addEventListener('click', handleDownloadImage);
   $('copy-image-url').addEventListener('click', handleCopyImageUrl);
   $('manage-btn').addEventListener('click', handleManage);
@@ -849,6 +1137,7 @@ async function init() {
   }
 
   log('[ContentPulse][popup] existing key found, verifying it is still valid');
+  showScreen('screen-boot');
   const res = await sendMessage({ action: 'validateKey', apiKey });
 
   if (res && res.ok) {
