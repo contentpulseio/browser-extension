@@ -38,18 +38,31 @@ review its details before publishing.
 
 ### 3. Review and publish
 
-The detail view shows the title, body, SEO metadata, and featured image. From
-here you can:
+The detail view is split into three tabs — **Publish**, **Content**, and
+**SEO**. From here you can:
 
 - **Fill in editor** — open the target editor (e.g. a LinkedIn Article) and the
-  extension fills the title and formatted body automatically.
+  extension fills the title, formatted body, publisher, cover image and SEO
+  settings automatically.
+- **Schedule** (clock icon) — drive LinkedIn's schedule flow with the article's
+  scheduled date and time pre-filled.
 - **Copy formatted** / **Copy HTML** — paste into any other platform as a fallback.
 
-![Article detail](docs/detail.png)
+![Article detail — Publish tab](docs/detail.png)
+
+The **Content** tab previews the article body, offers formatted / text / HTML
+copies, and shows the featured image with its ready-to-paste credit line.
+
+![Article detail — Content tab](docs/detail-content.png)
+
+The **SEO** tab carries the meta title, description, slug and keywords, with a
+one-click **Fill SEO on LinkedIn** action.
+
+![Article detail — SEO tab](docs/detail-seo.png)
 
 ### 4. Settings
 
-Manage your connection and publishing preferences from the **Settings** tab.
+Manage your connection from the gear icon in the Publish Queue header.
 
 ![Settings](docs/settings.png)
 
