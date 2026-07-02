@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ContentPulse: AI SEO Content Writer & Publisher",
-  "version": "1.1.0",
+  "version": "1.6.1",
   "description": "Fetch SEO-ready content from ContentPulse and auto-fill it into your publishing editor to review and publish in one click.",
   "icons": {
     "16": "assets/icon-16.png",
@@ -22,13 +22,48 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://contentpulse.io/*", "https://www.linkedin.com/*"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://contentpulse.io/*",
+    "https://*.contentpulse.io/*",
+    "https://www.linkedin.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/article/*", "https://www.linkedin.com/pulse/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.linkedin.com/article/*",
+        "https://www.linkedin.com/pulse/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": [
+        "panel.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup.html",
+        "popup.js",
+        "styles.css",
+        "assets/*"
+      ],
+      "matches": [
+        "https://www.linkedin.com/*"
+      ]
     }
   ],
   "content_security_policy": {
