@@ -15,6 +15,28 @@
   const logoUrl = chrome.runtime.getURL('assets/cp-logo-64.png');
   const panelUrl = chrome.runtime.getURL('popup.html?embedded=1');
 
+  // Pin the bubble's look in EVERY interaction state. LinkedIn's own button
+  // CSS (hover/focus/active ripple + gradient overlays via pseudo-elements)
+  // can bleed onto our injected <button>; inline styles alone cannot beat
+  // pseudo-elements or !important page rules, so we ship our own !important
+  // stylesheet and disable ::before/::after entirely.
+  const guard = document.createElement('style');
+  guard.id = 'cp-panel-fab-style';
+  guard.textContent = [
+    '#cp-panel-fab, #cp-panel-fab:hover, #cp-panel-fab:focus, #cp-panel-fab:focus-visible, #cp-panel-fab:active {',
+    '  background: #52227a !important;',
+    '  background-image: none !important;',
+    '  border: none !important;',
+    '  outline: none !important;',
+    '  box-shadow: 0 4px 14px rgba(0,0,0,.25) !important;',
+    '}',
+    '#cp-panel-fab::before, #cp-panel-fab::after {',
+    '  content: none !important;',
+    '  display: none !important;',
+    '}',
+  ].join('\n');
+  document.documentElement.appendChild(guard);
+
   // ── Floating bubble ──
   const fab = document.createElement('button');
   fab.id = 'cp-panel-fab';

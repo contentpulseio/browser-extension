@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ContentPulse: AI SEO Content Writer & Publisher",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Fetch SEO-ready content from ContentPulse and auto-fill it into your publishing editor to review and publish in one click.",
   "icons": {
     "16": "assets/icon-16.png",
