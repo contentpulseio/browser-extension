@@ -135,7 +135,7 @@ function showToast(message, ok) {
     fontSize: '14px',
     color: '#ffffff',
     boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-    background: ok ? '#0077B5' : '#c0392b',
+    background: ok ? '#52227a' : '#c0392b',
   });
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);
