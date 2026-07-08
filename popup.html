@@ -277,6 +277,12 @@
         </div>
       </div>
       <div class="cp-card" style="margin-top:8px">
+        <div id="reddit-website-filter" class="cp-filter" style="margin-bottom:8px">
+          <label class="cp-label" for="reddit-website-select">Website</label>
+          <div class="cp-select-wrap">
+            <select id="reddit-website-select" class="cp-select"></select>
+          </div>
+        </div>
         <p id="reddit-tab-info" class="cp-help" style="margin-bottom:8px"></p>
         <button id="reddit-extract-btn" class="cp-btn cp-btn-primary" style="width:100%">Extract Reddit Data</button>
         <p id="reddit-error" class="cp-error" hidden></p>
@@ -284,8 +290,12 @@
       <div id="reddit-result-card" class="cp-card" hidden style="margin-top:8px">
         <div class="cp-card-head">
           <span class="cp-field-label">Extracted Data</span>
-          <button id="reddit-copy-btn" class="cp-btn cp-btn-secondary cp-btn-sm">Copy JSON</button>
+          <div class="cp-btn-cluster">
+            <button id="reddit-send-btn" class="cp-btn cp-btn-primary cp-btn-sm">Send to ContentPulse</button>
+            <button id="reddit-copy-btn" class="cp-btn cp-btn-secondary cp-btn-sm">Copy JSON</button>
+          </div>
         </div>
+        <p id="reddit-send-status" class="cp-help" hidden style="margin-top:4px"></p>
         <div id="reddit-summary" style="margin-top:6px"></div>
         <textarea id="reddit-json" class="cp-input" style="height:200px;font-size:11px;font-family:monospace;resize:vertical;margin-top:8px" readonly></textarea>
       </div>

@@ -169,6 +169,43 @@ async function recordPublication(contentId, platform, remoteUrl) {
   }
 }
 
+async function redditIngest(payload) {
+  const { apiKey } = await getStored(['apiKey']);
+  if (!apiKey) {
+    return { ok: false, status: 401, error: 'No API key stored. Please connect first.' };
+  }
+  if (!payload) {
+    return { ok: false, status: 0, error: 'No data to send.' };
+  }
+
+  try {
+    const url = `${API_BASE}/reddit/ingest`;
+    log('[ContentPulse][bg] POST', url);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = body?.message || `Failed to ingest Reddit data (${res.status})`;
+      warn('[ContentPulse][bg] redditIngest failed', res.status, message);
+      return { ok: false, status: res.status, error: message };
+    }
+
+    log('[ContentPulse][bg] Reddit data ingested', body?.data);
+    return { ok: true, status: res.status, data: body?.data ?? null };
+  } catch (e) {
+    err('[ContentPulse][bg] redditIngest network error', e);
+    return { ok: false, status: 0, error: `Network error: ${e.message}` };
+  }
+}
+
 function normalizeArticle(item) {
   const version = item.current_version || {};
   const title = item.title || version.title || 'Untitled';
@@ -2104,6 +2141,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'recordPublication':
       recordPublication(message.contentId, message.platform, message.remoteUrl).then(sendResponse);
+      return true;
+
+    case 'redditIngest':
+      redditIngest(message.payload).then(sendResponse);
       return true;
 
     default:
