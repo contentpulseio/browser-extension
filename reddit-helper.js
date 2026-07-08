@@ -11,7 +11,11 @@
       null;
 
     const title = header.querySelector('#title')?.textContent?.trim() || name;
-    const description = header.querySelector('#description')?.textContent?.trim() || '';
+    const description =
+      header.querySelector('#description')?.textContent?.trim() ||
+      document.querySelector('#description')?.textContent?.trim() ||
+      document.querySelector('.i18n-subreddit-description')?.textContent?.trim() ||
+      '';
     const weeklyVisitors = parseInt(header.getAttribute('weekly-active-users') || '0', 10);
     const weeklyContributions = parseInt(header.getAttribute('weekly-contributions') || '0', 10);
     const subscriberEl = header.querySelector('[slot="subscribers-count"]');
@@ -110,7 +114,7 @@
       const bodyEl = el.querySelector('.md');
       const body = bodyEl?.textContent?.trim() || '';
 
-      if (author && body) {
+      if (author && body && author !== 'AutoModerator') {
         comments.push({
           id: thingId,
           author,

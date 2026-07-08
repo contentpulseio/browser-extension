@@ -1105,7 +1105,6 @@ async function checkRedditTab() {
 
     if (isReddit) {
       $('reddit-tools-btn').hidden = false;
-      populateRedditWebsites();
     }
   } catch (e) {
     $('reddit-tab-info').textContent = 'Could not detect active tab.';
@@ -1141,7 +1140,7 @@ async function handleRedditExtract() {
           return {
             name,
             title: header.querySelector('#title')?.textContent?.trim() || name,
-            description: header.querySelector('#description')?.textContent?.trim() || '',
+            description: header.querySelector('#description')?.textContent?.trim() || document.querySelector('#description')?.textContent?.trim() || document.querySelector('.i18n-subreddit-description')?.textContent?.trim() || '',
             subscribers: header.querySelector('[slot="subscribers-count"]')?.textContent?.trim() || null,
             weekly_visitors: parseInt(header.getAttribute('weekly-active-users') || '0', 10),
             weekly_contributions: parseInt(header.getAttribute('weekly-contributions') || '0', 10),
@@ -1199,7 +1198,7 @@ async function handleRedditExtract() {
           document.querySelectorAll('shreddit-comment').forEach((el) => {
             const author = el.getAttribute('author') || '';
             const body = el.querySelector('.md')?.textContent?.trim() || '';
-            if (author && body) {
+            if (author && body && author !== 'AutoModerator') {
               comments.push({
                 id: el.getAttribute('thingid') || '',
                 author,
@@ -1280,14 +1279,6 @@ async function handleRedditSend() {
   const json = $('reddit-json').value;
   if (!json) return;
 
-  const websiteSelect = $('reddit-website-select');
-  const websiteId = websiteSelect.value;
-  if (!websiteId) {
-    $('reddit-send-status').textContent = 'Please select a website first.';
-    $('reddit-send-status').hidden = false;
-    return;
-  }
-
   const btn = $('reddit-send-btn');
   const status = $('reddit-send-status');
   btn.disabled = true;
@@ -1296,14 +1287,16 @@ async function handleRedditSend() {
 
   try {
     const payload = JSON.parse(json);
-    payload.website_id = parseInt(websiteId, 10);
 
     const res = await sendMessage({ action: 'redditIngest', payload });
 
     if (res && res.ok) {
       const d = res.data?.updated || {};
       let msg = 'Saved to ContentPulse.';
-      if (d.subreddit) msg += ` Subreddit "${d.subreddit}" updated (${(d.subreddit_fields || []).join(', ')}).`;
+      if (d.subreddit) {
+        const count = d.subreddit_count || 1;
+        msg += ` r/${d.subreddit} updated across ${count} website${count > 1 ? 's' : ''}.`;
+      }
       if (d.opportunity) msg += ` Opportunity updated with ${d.comments_count || 0} comments.`;
       if (!d.subreddit && !d.opportunity) msg += ' No matching records found to update.';
       status.textContent = msg;
@@ -1323,25 +1316,6 @@ async function handleRedditSend() {
   btn.disabled = false;
 }
 
-async function populateRedditWebsites() {
-  const select = $('reddit-website-select');
-  if (select.options.length > 1) return;
-
-  try {
-    const res = await sendMessage({ action: 'getWebsites' });
-    if (res && res.ok && res.websites) {
-      select.innerHTML = '<option value="">Select website…</option>';
-      for (const w of res.websites) {
-        const opt = document.createElement('option');
-        opt.value = w.id;
-        opt.textContent = w.domain || w.name || `Website #${w.id}`;
-        select.appendChild(opt);
-      }
-    }
-  } catch (e) {
-    log('[ContentPulse][popup] failed to load websites for Reddit tools', e);
-  }
-}
 
 async function init() {
   renderMarquee();

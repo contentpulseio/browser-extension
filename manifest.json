@@ -59,7 +59,7 @@
         "https://www.reddit.com/r/*"
       ],
       "js": [
-        "reddit-extractor.js"
+        "reddit-helper.js"
       ],
       "run_at": "document_idle"
     }
@@ -78,7 +78,7 @@
     },
     {
       "resources": [
-        "reddit-extractor.js"
+        "reddit-helper.js"
       ],
       "matches": [
         "https://www.reddit.com/*"
