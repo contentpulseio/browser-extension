@@ -15,6 +15,7 @@ const APP_BASE_URL = 'https://app.contentpulse.io';
 // True when this page runs inside the in-page LinkedIn panel (iframe injected
 // by panel.js) instead of the toolbar popup.
 const IS_EMBEDDED = new URLSearchParams(location.search).has('embedded');
+const IS_REDDIT_EMBED = new URLSearchParams(location.search).has('reddit');
 
 // The toolbar popup closes itself after a successful fill; the in-page panel
 // exists precisely so the user can keep it open, so it stays.
@@ -224,6 +225,12 @@ async function enterConnectedShell() {
   if (!$('screen-onboarding').hidden) return; // session expired during boot
   showTab('list');
   showRedditBtnIfNeeded();
+
+  if (IS_REDDIT_EMBED) {
+    $('reddit-tools-btn').hidden = false;
+    checkRedditTab();
+    showScreen('screen-reddit');
+  }
 }
 
 function renderAccountBar(tenant) {

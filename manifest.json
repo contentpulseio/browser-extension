@@ -59,7 +59,8 @@
         "https://www.reddit.com/r/*"
       ],
       "js": [
-        "reddit-helper.js"
+        "reddit-helper.js",
+        "reddit-panel.js"
       ],
       "run_at": "document_idle"
     }
@@ -73,14 +74,7 @@
         "assets/*"
       ],
       "matches": [
-        "https://www.linkedin.com/*"
-      ]
-    },
-    {
-      "resources": [
-        "reddit-helper.js"
-      ],
-      "matches": [
+        "https://www.linkedin.com/*",
         "https://www.reddit.com/*"
       ]
     }
