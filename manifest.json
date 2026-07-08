@@ -30,7 +30,9 @@
   "host_permissions": [
     "https://contentpulse.io/*",
     "https://*.contentpulse.io/*",
-    "https://www.linkedin.com/*"
+    "https://www.linkedin.com/*",
+    "https://www.reddit.com/*",
+    "https://old.reddit.com/*"
   ],
   "content_scripts": [
     {
@@ -51,6 +53,15 @@
         "panel.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.reddit.com/r/*"
+      ],
+      "js": [
+        "reddit-extractor.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
@@ -63,6 +74,14 @@
       ],
       "matches": [
         "https://www.linkedin.com/*"
+      ]
+    },
+    {
+      "resources": [
+        "reddit-extractor.js"
+      ],
+      "matches": [
+        "https://www.reddit.com/*"
       ]
     }
   ],
