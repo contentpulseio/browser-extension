@@ -1,15 +1,3 @@
-/**
- * ContentPulse Reddit Data Extractor
- *
- * Extracts subreddit metadata, post data, and comments from Reddit pages.
- * Can be injected via browser console or loaded as a content script.
- *
- * Usage (browser console on any reddit.com page):
- *   - Paste this entire script
- *   - Call: extractRedditData()
- *   - The JSON result is copied to clipboard and logged to console
- */
-
 (function () {
   'use strict';
 
@@ -150,7 +138,7 @@
   function extractRedditData() {
     const pageType = detectPageType();
     const result = {
-      extracted_at: new Date().toISOString(),
+      collected_at: new Date().toISOString(),
       url: window.location.href,
       page_type: pageType,
       subreddit: extractSubredditInfo(),
@@ -162,20 +150,6 @@
       result.comments = extractComments();
     }
 
-    try {
-      const json = JSON.stringify(result, null, 2);
-      navigator.clipboard.writeText(json).then(
-        () => console.log('%c[ContentPulse] Data copied to clipboard!', 'color: #7c3aed; font-weight: bold'),
-        () => console.warn('[ContentPulse] Clipboard write failed, check console output')
-      );
-      console.log('%c[ContentPulse] Extracted Reddit Data:', 'color: #7c3aed; font-weight: bold');
-      console.log(result);
-      console.log('%cJSON:', 'color: #7c3aed; font-weight: bold');
-      console.log(json);
-    } catch (e) {
-      console.error('[ContentPulse] Error:', e);
-    }
-
     return result;
   }
 
@@ -184,11 +158,6 @@
   if (typeof window.__cpAutoExtract !== 'undefined' && window.__cpAutoExtract) {
     extractRedditData();
   }
-
-  console.log(
-    '%c[ContentPulse Reddit Extractor] Ready. Run: extractRedditData() or window.__cpExtractRedditData()',
-    'color: #7c3aed; font-weight: bold; font-size: 14px'
-  );
 
   extractRedditData();
 })();

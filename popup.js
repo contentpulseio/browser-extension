@@ -1127,7 +1127,7 @@ async function handleRedditExtract() {
   const btn = $('reddit-extract-btn');
   const err = $('reddit-error');
   err.hidden = true;
-  btn.textContent = 'Extracting…';
+  btn.textContent = 'Collecting…';
   btn.disabled = true;
 
   try {
@@ -1217,7 +1217,7 @@ async function handleRedditExtract() {
         const url = window.location.href;
         const isPost = url.includes('/comments/');
         const result = {
-          extracted_at: new Date().toISOString(),
+          collected_at: new Date().toISOString(),
           url,
           page_type: isPost ? 'post' : 'subreddit',
           subreddit: extractSubredditInfo(),
@@ -1233,9 +1233,9 @@ async function handleRedditExtract() {
 
     const data = results?.[0]?.result;
     if (!data) {
-      err.textContent = 'No data returned. Make sure you are on a Reddit page.';
+      err.textContent = 'No data found. Make sure you are on a Reddit community or post page.';
       err.hidden = false;
-      btn.textContent = 'Extract Reddit Data';
+      btn.textContent = 'Collect Reddit Insights';
       btn.disabled = false;
       return;
     }
@@ -1253,15 +1253,15 @@ async function handleRedditExtract() {
     }
     if (data.rules?.length) summary += `${data.rules.length} rules found<br>`;
     if (data.post) summary += `Post: "${data.post.title}" (${data.post.score} upvotes, ${data.post.comment_count} comments)<br>`;
-    if (data.comments?.length) summary += `${data.comments.length} comments extracted`;
-    $('reddit-summary').innerHTML = summary || 'Data extracted.';
+    if (data.comments?.length) summary += `${data.comments.length} comments collected`;
+    $('reddit-summary').innerHTML = summary || 'Data collected.';
 
-    btn.textContent = 'Extract Reddit Data';
+    btn.textContent = 'Collect Reddit Insights';
     btn.disabled = false;
   } catch (e) {
-    err.textContent = e.message || 'Extraction failed.';
+    err.textContent = e.message || 'Could not collect data from this page.';
     err.hidden = false;
-    btn.textContent = 'Extract Reddit Data';
+    btn.textContent = 'Collect Reddit Insights';
     btn.disabled = false;
   }
 }
