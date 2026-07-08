@@ -8,7 +8,7 @@ const warn = (...args) => {
   if (CP_DEBUG) console.warn(...args);
 };
 
-const SCREENS = ['screen-boot', 'screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings'];
+const SCREENS = ['screen-boot', 'screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings', 'screen-reddit'];
 
 const APP_BASE_URL = 'https://app.contentpulse.io';
 
@@ -223,6 +223,7 @@ async function enterConnectedShell() {
   await loadArticles(selectedWebsiteId);
   if (!$('screen-onboarding').hidden) return; // session expired during boot
   showTab('list');
+  showRedditBtnIfNeeded();
 }
 
 function renderAccountBar(tenant) {
@@ -1089,6 +1090,191 @@ async function handleDisconnect() {
   window.location.reload();
 }
 
+let redditTabId = null;
+
+async function checkRedditTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = tab?.url || '';
+    const isReddit = url.includes('reddit.com/r/');
+    $('reddit-tab-info').textContent = isReddit
+      ? `Active tab: ${url.split('?')[0]}`
+      : 'Navigate to a Reddit subreddit or post page first.';
+    $('reddit-extract-btn').disabled = !isReddit;
+    redditTabId = isReddit ? tab.id : null;
+
+    if (isReddit) {
+      $('reddit-tools-btn').hidden = false;
+    }
+  } catch (e) {
+    $('reddit-tab-info').textContent = 'Could not detect active tab.';
+    $('reddit-extract-btn').disabled = true;
+  }
+}
+
+async function showRedditBtnIfNeeded() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url?.includes('reddit.com/r/')) {
+      $('reddit-tools-btn').hidden = false;
+    }
+  } catch (e) {}
+}
+
+async function handleRedditExtract() {
+  if (!redditTabId) return;
+  const btn = $('reddit-extract-btn');
+  const err = $('reddit-error');
+  err.hidden = true;
+  btn.textContent = 'Extracting…';
+  btn.disabled = true;
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: redditTabId },
+      func: () => {
+        function extractSubredditInfo() {
+          const header = document.querySelector('shreddit-subreddit-header');
+          if (!header) return null;
+          const name = header.getAttribute('name') || header.getAttribute('prefixed-name')?.replace('r/', '') || null;
+          return {
+            name,
+            title: header.querySelector('#title')?.textContent?.trim() || name,
+            description: header.querySelector('#description')?.textContent?.trim() || '',
+            subscribers: header.querySelector('[slot="subscribers-count"]')?.textContent?.trim() || null,
+            weekly_visitors: parseInt(header.getAttribute('weekly-active-users') || '0', 10),
+            weekly_contributions: parseInt(header.getAttribute('weekly-contributions') || '0', 10),
+          };
+        }
+
+        function extractRules() {
+          const rules = [];
+          const allH2 = document.querySelectorAll('h2');
+          let container = null;
+          for (const h2 of allH2) {
+            if (h2.textContent?.includes('Rules')) {
+              container = h2.closest('.px-md') || h2.parentElement;
+              break;
+            }
+          }
+          if (!container) return rules;
+          container.querySelectorAll('faceplate-expandable-section-helper').forEach((section) => {
+            const numberEl = section.querySelector('.text-neutral-content-weak.text-14.font-normal');
+            const titleEl = section.querySelector('h2.i18n-translatable-text');
+            const descEl = section.querySelector('.i18n-translatable-text.ms-xl .md p');
+            const ruleTitle = titleEl?.textContent?.trim() || '';
+            if (ruleTitle) {
+              rules.push({
+                number: parseInt(numberEl?.textContent?.trim() || '', 10) || rules.length + 1,
+                title: ruleTitle,
+                description: descEl?.textContent?.trim() || '',
+              });
+            }
+          });
+          return rules;
+        }
+
+        function extractPostData() {
+          const post = document.querySelector('shreddit-post');
+          if (!post) return null;
+          const titleEl = document.querySelector('[id^="post-title-"]');
+          const bodyEl = post.querySelector('[slot="text-body"] .md');
+          return {
+            id: post.getAttribute('id') || null,
+            title: titleEl?.textContent?.trim() || post.getAttribute('post-title') || '',
+            author: post.getAttribute('author') || '',
+            subreddit: post.getAttribute('subreddit-prefixed-name') || '',
+            score: parseInt(post.getAttribute('score') || '0', 10),
+            comment_count: parseInt(post.getAttribute('comment-count') || '0', 10),
+            created: post.getAttribute('created-timestamp') || null,
+            permalink: post.getAttribute('permalink') || null,
+            post_type: post.getAttribute('post-type') || 'text',
+            body: bodyEl?.textContent?.trim() || null,
+          };
+        }
+
+        function extractComments() {
+          const comments = [];
+          document.querySelectorAll('shreddit-comment').forEach((el) => {
+            const author = el.getAttribute('author') || '';
+            const body = el.querySelector('.md')?.textContent?.trim() || '';
+            if (author && body) {
+              comments.push({
+                id: el.getAttribute('thingid') || '',
+                author,
+                body,
+                score: parseInt(el.getAttribute('score') || '0', 10),
+                depth: parseInt(el.getAttribute('depth') || '0', 10),
+                created: el.getAttribute('created') || null,
+                permalink: el.getAttribute('permalink') ? 'https://www.reddit.com' + el.getAttribute('permalink') : null,
+              });
+            }
+          });
+          return comments;
+        }
+
+        const url = window.location.href;
+        const isPost = url.includes('/comments/');
+        const result = {
+          extracted_at: new Date().toISOString(),
+          url,
+          page_type: isPost ? 'post' : 'subreddit',
+          subreddit: extractSubredditInfo(),
+          rules: extractRules(),
+        };
+        if (isPost) {
+          result.post = extractPostData();
+          result.comments = extractComments();
+        }
+        return result;
+      },
+    });
+
+    const data = results?.[0]?.result;
+    if (!data) {
+      err.textContent = 'No data returned. Make sure you are on a Reddit page.';
+      err.hidden = false;
+      btn.textContent = 'Extract Reddit Data';
+      btn.disabled = false;
+      return;
+    }
+
+    const json = JSON.stringify(data, null, 2);
+    $('reddit-json').value = json;
+    $('reddit-result-card').hidden = false;
+
+    let summary = '';
+    if (data.subreddit) {
+      summary += `<strong>r/${data.subreddit.name}</strong>`;
+      if (data.subreddit.subscribers) summary += ` · ${data.subreddit.subscribers} members`;
+      if (data.subreddit.weekly_visitors) summary += ` · ${data.subreddit.weekly_visitors.toLocaleString()} weekly visitors`;
+      summary += '<br>';
+    }
+    if (data.rules?.length) summary += `${data.rules.length} rules found<br>`;
+    if (data.post) summary += `Post: "${data.post.title}" (${data.post.score} upvotes, ${data.post.comment_count} comments)<br>`;
+    if (data.comments?.length) summary += `${data.comments.length} comments extracted`;
+    $('reddit-summary').innerHTML = summary || 'Data extracted.';
+
+    btn.textContent = 'Extract Reddit Data';
+    btn.disabled = false;
+  } catch (e) {
+    err.textContent = e.message || 'Extraction failed.';
+    err.hidden = false;
+    btn.textContent = 'Extract Reddit Data';
+    btn.disabled = false;
+  }
+}
+
+function handleRedditCopy() {
+  const json = $('reddit-json').value;
+  if (!json) return;
+  navigator.clipboard.writeText(json).then(() => {
+    const btn = $('reddit-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy JSON'; }, 2000);
+  });
+}
+
 async function init() {
   renderMarquee();
   $('save-connect-btn').addEventListener('click', handleSaveConnect);
@@ -1099,6 +1285,13 @@ async function init() {
   $('website-select').addEventListener('change', handleWebsiteChange);
   $('settings-btn').addEventListener('click', () => showTab('settings'));
   $('settings-back-btn').addEventListener('click', () => showTab('list'));
+  $('reddit-tools-btn').addEventListener('click', () => {
+    showScreen('screen-reddit');
+    checkRedditTab();
+  });
+  $('reddit-back-btn').addEventListener('click', () => showTab('list'));
+  $('reddit-extract-btn').addEventListener('click', handleRedditExtract);
+  $('reddit-copy-btn').addEventListener('click', handleRedditCopy);
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
   $('schedule-btn').addEventListener('click', handleSchedule);
