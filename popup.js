@@ -207,6 +207,11 @@ function selectedWebsiteLinkedInAuthor() {
   const match = websites.find((w) => w.id === selectedWebsiteId);
   return match?.linkedin_author || '';
 }
+function selectedWebsiteLinkedInAuthorUrn() {
+  const match = websites.find((w) => w.id === selectedWebsiteId);
+  return match?.linkedin_author_urn || '';
+}
+
 
 function creditCaption() {
   if (!selectedArticle) return '';
@@ -818,6 +823,8 @@ async function handleFill() {
       title: selectedArticle.title,
       body_html: selectedArticle.body_html,
       platform: backendPlatformFor(selectedPlatform) || 'linkedin_pulse',
+      // Open the editor directly as the configured LinkedIn company/profile.
+      publish_as_urn: selectedWebsiteLinkedInAuthorUrn(),
       // Needed by the background to arm the share-dialog auto-fill.
       share_post: selectedArticle.share_post || null,
       // Connected LinkedIn profile/page of the article's website - the

@@ -68,6 +68,7 @@ async function getWebsites() {
       id: w.id,
       name: w.name || 'Untitled site',
       linkedin_author: w.linkedin_token?.author_name || null,
+      linkedin_author_urn: w.linkedin_token?.author_urn || null,
     }));
     log('[ContentPulse][bg] fetched', websites.length, 'websites');
     return { ok: true, status: 200, websites };
@@ -1863,7 +1864,11 @@ function openAndFill(article) {
     log('[ContentPulse][bg] no editor in the active tab, opening a new one');
     // If we already learned this publisher's URN, open the editor publishing
     // as it right away (?author=<urn>) - no Publish-as clicking needed.
-    getKnownPublisherUrn(publishAs).then((urn) => {
+    const configuredUrn = typeof article?.publish_as_urn === 'string' ? article.publish_as_urn.trim() : '';
+    getKnownPublisherUrn(publishAs).then((knownUrn) => {
+      // Prefer the URN returned by the API. The local cache is only a fallback
+      // for older sessions whose website list predates author_urn propagation.
+      const urn = configuredUrn || knownUrn || '';
       const editorUrl = urn ? `${LINKEDIN_EDITOR_URL}?author=${encodeURIComponent(urn)}` : LINKEDIN_EDITOR_URL;
       if (urn) log('[ContentPulse][bg] opening editor with known author urn', urn);
       chrome.tabs.create({ url: editorUrl }, (tab) => {
