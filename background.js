@@ -2387,12 +2387,22 @@ function cpFillSubstackThumbnail(b64, mime, seoTitle, seoDescription) {
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(file);
       input.files = dataTransfer.files;
-      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      // Substack's file-settings component listens to `onInput` (not
+      // `onChange`). Keep this identical to its native file-selection path;
+      // dispatching both events can start two overlapping image uploads and
+      // leave the thumbnail component stuck on Loading… .
+      const inputEvent = typeof InputEvent === 'function'
+        ? new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromDrop' })
+        : new Event('input', { bubbles: true, composed: true });
+      input.dispatchEvent(inputEvent);
 
       // These are Substack's current file-sidebar fields. They provide useful
       // title/description metadata for the thumbnail and improve its SEO and
       // accessibility even though the thumbnail has no visible caption field.
+      const preview = await waitFor(() => {
+        const scope = document.querySelector('.post-editor-file-edit-sidebar') || document;
+        return Array.from(scope.querySelectorAll('img')).find((img) => (img.currentSrc || img.src || '').length > 0) || null;
+      }, 20000, 250);
       const titleOk = setNative(
         document.querySelector('input[placeholder="Add a title..."]'),
         String(seoTitle || '').slice(0, 500),
@@ -2401,10 +2411,6 @@ function cpFillSubstackThumbnail(b64, mime, seoTitle, seoDescription) {
         document.querySelector('textarea[placeholder="Add a description..."]'),
         String(seoDescription || '').slice(0, 500),
       );
-      const preview = await waitFor(() => {
-        const scope = document.querySelector('.post-editor-file-edit-sidebar') || document;
-        return Array.from(scope.querySelectorAll('img')).find((img) => (img.currentSrc || img.src || '').length > 0) || null;
-      }, 20000, 250);
       resolve({
         ok: !!preview,
         method: 'thumbnail-file-input',
