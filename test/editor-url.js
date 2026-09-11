@@ -30,6 +30,8 @@ assert(source.includes('openAndFill(message.article)'));
 assert(source.includes(".then((result) => sendResponse(result || { ok: true }))"));
 assert(source.includes("return /^https:\\/\\/[^/]+\\.substack\\.com\\/publish\\/post(?:\\/|$)/.test(url);"));
 assert(source.includes("if (/^[a-z0-9][a-z0-9-]*$/i.test(value)) return value.toLowerCase();"));
+assert(source.includes("createImageBitmap(file)"), 'Substack thumbnails must convert unsupported image formats');
+assert(source.includes("thumbnail-upload-not-confirmed"), 'Substack thumbnails must verify upload completion');
 assert(fs.readFileSync(path.resolve(__dirname, '..', 'manifest.json'), 'utf8').includes('https://*.substack.com/publish/post*'));
 assert(fs.readFileSync(path.resolve(__dirname, '..', 'medium-content.js'), 'utf8').includes("platform: 'medium'"));
 assert(fs.readFileSync(path.resolve(__dirname, '..', 'substack-content.js'), 'utf8').includes("platform: 'substack'"));

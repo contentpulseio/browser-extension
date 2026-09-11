@@ -2278,7 +2278,27 @@ function cpFillSubstackThumbnail(b64, mime, seoTitle, seoDescription) {
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
       const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-      const file = new File([bytes], `contentpulse-thumbnail.${ext}`, { type: mime });
+      let file = new File([bytes], `contentpulse-thumbnail.${ext}`, { type: mime });
+
+      // ContentPulse commonly serves WebP, while Substack's thumbnail
+      // processor is more reliable with JPEG/PNG. Convert unsupported formats
+      // in the page before assigning the FileList to Substack's input.
+      if (mime !== 'image/jpeg' && mime !== 'image/png' && typeof createImageBitmap === 'function') {
+        try {
+          const bitmap = await createImageBitmap(file);
+          const canvas = document.createElement('canvas');
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          canvas.getContext('2d').drawImage(bitmap, 0, 0);
+          const converted = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+          bitmap.close?.();
+          if (converted) file = new File([converted], 'contentpulse-thumbnail.jpg', { type: 'image/jpeg' });
+        } catch (conversionError) {
+          // Keep the original file as a fallback for browsers that cannot
+          // decode the source format; Substack will report the upload result.
+        }
+      }
+
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(file);
       input.files = dataTransfer.files;
@@ -2296,10 +2316,18 @@ function cpFillSubstackThumbnail(b64, mime, seoTitle, seoDescription) {
         document.querySelector('textarea[placeholder="Add a description..."]'),
         String(seoDescription || '').slice(0, 500),
       );
-      await sleep(1500);
-      const sidebar = input.closest('.file-sidebar') || input.parentElement;
-      const preview = sidebar && Array.from(sidebar.querySelectorAll('img')).some((img) => (img.src || '').length > 0);
-      resolve({ ok: true, method: 'thumbnail-file-input', preview, titleOk, descriptionOk });
+      const preview = await waitFor(() => {
+        const scope = document.querySelector('.post-editor-file-edit-sidebar') || document;
+        return Array.from(scope.querySelectorAll('img')).find((img) => (img.currentSrc || img.src || '').length > 0) || null;
+      }, 20000, 250);
+      resolve({
+        ok: !!preview,
+        method: 'thumbnail-file-input',
+        preview: !!preview,
+        titleOk,
+        descriptionOk,
+        reason: preview ? undefined : 'thumbnail-upload-not-confirmed',
+      });
     } catch (e) {
       resolve({ ok: false, error: e.message });
     }
