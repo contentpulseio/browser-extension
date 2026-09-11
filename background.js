@@ -552,16 +552,18 @@ function normalizeArticle(item) {
 
   const scheduledDate = item.linkedin_scheduled_at || item.scheduled_at || null;
   const platform = normalizeExtensionPlatform(item.publish_channel || item.platform || '');
-  const rawSubstackDomain =
-    item.substack_domain ||
-    item.publish_options?.substack_domain ||
-    item.website?.substack_domain ||
-    (/\.substack\.com$/i.test(String(item.website?.domain || '')) ? item.website.domain : '');
-  const substackDomain = String(rawSubstackDomain || '')
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .split('/')[0]
-    .replace(/\.substack\.com$/i, '');
+  const substackPublication = Array.isArray(item.publications)
+    ? item.publications.find((publication) => String(publication?.platform || '').toLowerCase() === 'substack')
+    : null;
+  const substackDomain = [
+    item.substack_domain,
+    item.publish_options?.substack_domain,
+    substackPublication?.remote_url,
+    item.external_url,
+    item.article_url,
+    item.website?.substack_domain,
+    item.website?.domain,
+  ].map(normalizeSubstackDomain).find(Boolean) || '';
 
   const imageUrl = typeof version.featured_image_url === 'string' ? version.featured_image_url : null;
 
@@ -607,6 +609,26 @@ function normalizeArticle(item) {
     categories,
     substack_domain: substackDomain,
   };
+}
+
+function normalizeSubstackDomain(reference) {
+  const value = String(reference || '').trim();
+  if (!value) return '';
+
+  let url;
+  try {
+    url = new URL(value.includes('://') ? value : `https://${value}`);
+  } catch {
+    return '';
+  }
+
+  const host = String(url.hostname || '').toLowerCase();
+  if (host === 'open.substack.com') {
+    const match = url.pathname.match(/^\/pub\/([a-z0-9][a-z0-9-]*)\/p(?:\/|$)/i);
+    return match ? match[1].toLowerCase() : '';
+  }
+  if (host === 'substack.com' || !host.endsWith('.substack.com')) return '';
+  return host.replace(/\.substack\.com$/i, '');
 }
 
 // The article API puts charts, table renders, and other inline artwork inside
@@ -3858,7 +3880,7 @@ function publishedMediumUrl(url) {
 
 function isSubstackEditorUrl(url) {
   if (!url) return false;
-  return /^https:\/\/[^/]+\.substack\.com\/publish\/post\//.test(url);
+  return /^https:\/\/[^/]+\.substack\.com\/publish\/post(?:\/|$)/.test(url);
 }
 
 function publishedSubstackUrl(url) {
@@ -3976,19 +3998,36 @@ async function openAndFill(article, preferredTabId = null) {
 
   const isMedium = platform === 'medium';
 
-  const queryTargetTab = (callback) => {
+  const queryTargetTab = () => new Promise((resolve) => {
     if (preferredTabId) {
       chrome.tabs.get(preferredTabId, (tab) => {
         if (chrome.runtime.lastError) {
-          callback(null);
+          resolve(null);
           return;
         }
-        callback(tab || null);
+        resolve(tab || null);
       });
       return;
     }
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => callback(tabs && tabs[0]));
-  };
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs && tabs[0]));
+  });
+
+  const createEditorTab = (url, onCreated) =>
+    new Promise((resolve) => {
+      if (!url) {
+        resolve({ ok: false, error: 'No editor URL is configured for this platform.' });
+        return;
+      }
+      chrome.tabs.create({ url }, (tab) => {
+        const error = chrome.runtime.lastError;
+        if (error || !tab?.id) {
+          resolve({ ok: false, error: error?.message || 'The editor tab could not be opened.' });
+          return;
+        }
+        onCreated(tab);
+        resolve({ ok: true, tabId: tab.id });
+      });
+    });
 
   // Strip HTML to plain text (service worker has no DOMParser).
   const stripToText = (html) => {
@@ -4051,37 +4090,37 @@ async function openAndFill(article, preferredTabId = null) {
       await mediumAfterEditorFill(tabId);
     };
 
-    queryTargetTab((activeTab) => {
+    const activeTab = await queryTargetTab();
+    if (activeTab && isMediumEditorUrl(activeTab.url)) {
+      log('[ContentPulse][bg] active tab is Medium editor, filling in place');
+      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
+      fillMediumTab(activeTab.id);
+      return { ok: true, tabId: activeTab.id, reused: true };
+    }
 
-      if (activeTab && isMediumEditorUrl(activeTab.url)) {
-        log('[ContentPulse][bg] active tab is Medium editor, filling in place');
-        watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
-        fillMediumTab(activeTab.id);
-        return;
-      }
+    const editorUrl = editorUrlWithContentId(MEDIUM_EDITOR_URL, contentId);
+    log('[ContentPulse][bg] opening Medium editor', editorUrl);
+    return createEditorTab(editorUrl, (tab) => {
+      const targetTabId = tab.id;
+      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
 
-      const editorUrl = editorUrlWithContentId(MEDIUM_EDITOR_URL, contentId);
-      log('[ContentPulse][bg] opening Medium editor', editorUrl);
-      chrome.tabs.create({ url: editorUrl }, (tab) => {
-        const targetTabId = tab.id;
-        watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
-
-        const listener = (tabId, changeInfo) => {
-          if (tabId !== targetTabId || changeInfo.status !== 'complete') return;
-          chrome.tabs.onUpdated.removeListener(listener);
-          // Medium's editor needs extra time to bootstrap ProseMirror.
-          setTimeout(() => {
-            if (directFillTabs.has(targetTabId)) {
-              directFillTabs.delete(targetTabId);
-              return;
-            }
-            fillMediumTab(targetTabId);
-          }, 2000);
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+      let readyHandled = false;
+      const listener = (tabId, changeInfo) => {
+        if (readyHandled || tabId !== targetTabId || changeInfo.status !== 'complete') return;
+        readyHandled = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        // Medium's editor needs extra time to bootstrap ProseMirror.
+        setTimeout(() => {
+          if (directFillTabs.has(targetTabId)) {
+            directFillTabs.delete(targetTabId);
+            return;
+          }
+          fillMediumTab(targetTabId);
+        }, 2000);
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      if (tab.status === 'complete') listener(targetTabId, { status: 'complete' });
     });
-    return;
   }
 
   // ── Substack flow ─────────────────────────────────────────────────
@@ -4106,46 +4145,44 @@ async function openAndFill(article, preferredTabId = null) {
       if (imageUrl) await substackCoverImage(tabId, imageUrl, title, thumbnailDescription);
     };
 
-    queryTargetTab((activeTab) => {
+    const activeTab = await queryTargetTab();
+    if (activeTab && isSubstackEditorUrl(activeTab.url)) {
+      log('[ContentPulse][bg] active tab is Substack editor, filling in place');
+      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
+      doFill(activeTab.id);
+      return { ok: true, tabId: activeTab.id, reused: true };
+    }
 
-      if (activeTab && isSubstackEditorUrl(activeTab.url)) {
-        log('[ContentPulse][bg] active tab is Substack editor, filling in place');
-        watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
-        doFill(activeTab.id);
-        return;
-      }
+    log('[ContentPulse][bg] no Substack editor in the active tab');
+    const substackDomain = article?.substack_domain || '';
+    const editorBaseUrl = substackDomain ? `https://${substackDomain}.substack.com/publish/post` : null;
+    const editorUrl = editorUrlWithContentId(editorBaseUrl, contentId);
 
-      log('[ContentPulse][bg] no Substack editor in the active tab');
-      const substackDomain = article?.substack_domain || '';
-      const editorBaseUrl = substackDomain
-        ? `https://${substackDomain}.substack.com/publish/post`
-        : null;
-      const editorUrl = editorUrlWithContentId(editorBaseUrl, contentId);
+    if (!editorUrl) {
+      log('[ContentPulse][bg] no Substack domain configured, cannot open editor');
+      return { ok: false, error: 'No Substack publication domain is configured for this article.' };
+    }
 
-      if (!editorUrl) {
-        log('[ContentPulse][bg] no Substack domain configured, cannot open editor');
-        return;
-      }
+    return createEditorTab(editorUrl, (tab) => {
+      const targetTabId = tab.id;
+      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
 
-      chrome.tabs.create({ url: editorUrl }, (tab) => {
-        const targetTabId = tab.id;
-        watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
-
-        const listener = (tabId, changeInfo) => {
-          if (tabId !== targetTabId || changeInfo.status !== 'complete') return;
-          chrome.tabs.onUpdated.removeListener(listener);
-          setTimeout(() => {
-            if (directFillTabs.has(targetTabId)) {
-              directFillTabs.delete(targetTabId);
-              return;
-            }
-            doFill(targetTabId);
-          }, 2000);
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+      let readyHandled = false;
+      const listener = (tabId, changeInfo) => {
+        if (readyHandled || tabId !== targetTabId || changeInfo.status !== 'complete') return;
+        readyHandled = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        setTimeout(() => {
+          if (directFillTabs.has(targetTabId)) {
+            directFillTabs.delete(targetTabId);
+            return;
+          }
+          doFill(targetTabId);
+        }, 2000);
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      if (tab.status === 'complete') listener(targetTabId, { status: 'complete' });
     });
-    return;
   }
 
   // ── LinkedIn flow (default) ──────────────────────────────────────
@@ -4190,47 +4227,48 @@ async function openAndFill(article, preferredTabId = null) {
     await afterFill(tabId, prepared);
   };
 
-  queryTargetTab((activeTab) => {
+  const activeTab = await queryTargetTab();
+  if (activeTab && isEditorUrl(activeTab.url)) {
+    log('[ContentPulse][bg] active tab is already the editor, filling in place');
+    watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, shareText);
+    fillLinkedInTab(activeTab.id);
+    armShareFill(activeTab.id);
+    return { ok: true, tabId: activeTab.id, reused: true };
+  }
 
-    if (activeTab && isEditorUrl(activeTab.url)) {
-      log('[ContentPulse][bg] active tab is already the editor, filling in place');
-      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, shareText);
-      fillLinkedInTab(activeTab.id);
-      armShareFill(activeTab.id);
-      return;
-    }
+  log('[ContentPulse][bg] no editor in the active tab, opening a new one');
+  // If we already learned this publisher's URN, open the editor publishing
+  // as it right away (?author=<urn>) - no Publish-as clicking needed.
+  const configuredUrn = typeof article?.publish_as_urn === 'string' ? article.publish_as_urn.trim() : '';
+  const urn = linkedinEditorAuthorUrn(configuredUrn);
+  const editorBaseUrl = urn ? `${LINKEDIN_EDITOR_URL}?author=${encodeURIComponent(urn)}` : LINKEDIN_EDITOR_URL;
+  const editorUrl = editorUrlWithContentId(editorBaseUrl, contentId);
+  if (urn) log('[ContentPulse][bg] opening editor with configured author urn', urn);
+  return createEditorTab(editorUrl, (tab) => {
+    const targetTabId = tab.id;
+    watchTabForPublish(targetTabId, contentId, platform, editorUrl, shareText);
 
-    log('[ContentPulse][bg] no editor in the active tab, opening a new one');
-    // If we already learned this publisher's URN, open the editor publishing
-    // as it right away (?author=<urn>) - no Publish-as clicking needed.
-    const configuredUrn = typeof article?.publish_as_urn === 'string' ? article.publish_as_urn.trim() : '';
-    const urn = linkedinEditorAuthorUrn(configuredUrn);
-    const editorBaseUrl = urn ? `${LINKEDIN_EDITOR_URL}?author=${encodeURIComponent(urn)}` : LINKEDIN_EDITOR_URL;
-    const editorUrl = editorUrlWithContentId(editorBaseUrl, contentId);
-    if (urn) log('[ContentPulse][bg] opening editor with configured author urn', urn);
-    chrome.tabs.create({ url: editorUrl }, (tab) => {
-      const targetTabId = tab.id;
-      watchTabForPublish(targetTabId, contentId, platform, editorUrl, shareText);
+    let readyHandled = false;
+    const listener = (tabId, changeInfo) => {
+      if (readyHandled || tabId !== targetTabId || changeInfo.status !== 'complete') {
+        return;
+      }
+      readyHandled = true;
+      log('[ContentPulse][bg] editor tab ready, filling via executeScript');
+      chrome.tabs.onUpdated.removeListener(listener);
+      if (directFillTabs.has(targetTabId)) {
+        directFillTabs.delete(targetTabId);
+        return;
+      }
+      linkedinPrepared.then(async (prepared) => {
+        const systemClipboardReady = clipboardPrepared || await waitForClipboardPrepared(clipboardToken);
+        pageFill(targetTabId, title, prepared.linkedinBodyHtml, '', true, systemClipboardReady).then(() => afterFill(targetTabId, prepared));
+      });
+      armShareFill(targetTabId);
+    };
 
-      const listener = (tabId, changeInfo) => {
-        if (tabId !== targetTabId || changeInfo.status !== 'complete') {
-          return;
-        }
-        log('[ContentPulse][bg] editor tab ready, filling via executeScript');
-        chrome.tabs.onUpdated.removeListener(listener);
-        if (directFillTabs.has(targetTabId)) {
-          directFillTabs.delete(targetTabId);
-          return;
-        }
-        linkedinPrepared.then(async (prepared) => {
-          const systemClipboardReady = clipboardPrepared || await waitForClipboardPrepared(clipboardToken);
-          pageFill(targetTabId, title, prepared.linkedinBodyHtml, '', true, systemClipboardReady).then(() => afterFill(targetTabId, prepared));
-        });
-        armShareFill(targetTabId);
-      };
-
-      chrome.tabs.onUpdated.addListener(listener);
-    });
+    chrome.tabs.onUpdated.addListener(listener);
+    if (tab.status === 'complete') listener(targetTabId, { status: 'complete' });
   });
 }
 
@@ -4466,7 +4504,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'autoFillFromContentId':
-      autoFillFromContentId(message.contentId, sender?.tab?.id, message.platform).then(sendResponse);
+      autoFillFromContentId(message.contentId, sender?.tab?.id, message.platform)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error?.message || 'The article could not be filled.' }));
       return true;
 
     case 'setScheduledAutoFill':
@@ -4479,9 +4519,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'openAndFill':
-      openAndFill(message.article);
-      sendResponse({ ok: true });
-      return false;
+      openAndFill(message.article)
+        .then((result) => sendResponse(result || { ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || 'The editor could not be opened.' }));
+      return true;
 
     case 'clipboardPrepared':
       sendResponse(recordClipboardPrepared(message.token, message.prepared));

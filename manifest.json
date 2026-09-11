@@ -81,7 +81,7 @@
     },
     {
       "matches": [
-        "https://*.substack.com/publish/post/*"
+        "https://*.substack.com/publish/post*"
       ],
       "js": [
         "substack-content.js"
