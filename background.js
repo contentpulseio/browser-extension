@@ -615,6 +615,10 @@ function normalizeSubstackDomain(reference) {
   const value = String(reference || '').trim();
   if (!value) return '';
 
+  // The API returns the publication slug for new articles before a remote
+  // Substack URL exists.
+  if (/^[a-z0-9][a-z0-9-]*$/i.test(value)) return value.toLowerCase();
+
   let url;
   try {
     url = new URL(value.includes('://') ? value : `https://${value}`);
