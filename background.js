@@ -1913,6 +1913,19 @@ function cpMediumPageFill(titleText, bodyHtml, bodyText, imageMeta) {
       if (kind !== 'progress') setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); }, 4000);
     };
 
+    const scrollToTop = () => {
+      const run = () => {
+        try {
+          window.scrollTo(0, 0);
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
+        } catch (e) {}
+      };
+      run();
+      setTimeout(run, 400);
+      setTimeout(run, 1200);
+    };
+
     setToast('ContentPulse: Filling content, please wait...', 'progress');
 
     const MAX_WAIT = 20;
@@ -1954,6 +1967,7 @@ function cpMediumPageFill(titleText, bodyHtml, bodyText, imageMeta) {
 
         (async () => {
           const metadata = await fillImageMetadata(editorEl);
+          scrollToTop();
           setToast(
             metadata.imageCount
               ? `ContentPulse: Article filled with ${metadata.imageCount} image${metadata.imageCount === 1 ? '' : 's'} and SEO text`
@@ -2140,6 +2154,19 @@ function cpSubstackPageFill(titleText, subtitleText, bodyHtml, bodyText, expecte
       if (kind !== 'progress') setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); }, 4000);
     };
 
+    const scrollToTop = () => {
+      const run = () => {
+        try {
+          window.scrollTo(0, 0);
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
+        } catch (e) {}
+      };
+      run();
+      setTimeout(run, 400);
+      setTimeout(run, 1200);
+    };
+
     armTagFill();
 
     setToast('ContentPulse: Filling content, please wait...', 'progress');
@@ -2201,6 +2228,7 @@ function cpSubstackPageFill(titleText, subtitleText, bodyHtml, bodyText, expecte
           }
         };
         waitForImages().then((imageCount) => {
+          scrollToTop();
           setToast(
             imageCount
               ? `ContentPulse: Article filled with ${imageCount} image${imageCount === 1 ? '' : 's'}`
