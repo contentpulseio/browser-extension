@@ -19,7 +19,10 @@
       </span>
     </header>
 
-    <section id="screen-boot" class="cp-screen cp-boot" hidden>
+    <!-- Keep a visible fallback while popup.js is loading. Previously every
+         screen started hidden, so one early initialization error rendered a
+         completely blank embedded panel with no diagnostic. -->
+    <section id="screen-boot" class="cp-screen cp-boot">
       <div class="cp-boot-inner">
         <img src="assets/cp-logo-64.png" alt="" width="36" height="36" class="cp-boot-logo" />
         <div class="cp-boot-spinner" role="status" aria-label="Loading"></div>
@@ -273,25 +276,41 @@
       <div class="cp-card">
         <div class="cp-list-heading">
           <h1 class="cp-title">Reddit Insights</h1>
-          <p class="cp-subtitle">Collect community info, rules, post details and comments from the active tab</p>
+          <p id="reddit-sync-status" class="cp-subtitle">Loading…</p>
         </div>
       </div>
-      <div class="cp-card" style="margin-top:8px">
-        <p id="reddit-tab-info" class="cp-help" style="margin-bottom:8px"></p>
-        <button id="reddit-extract-btn" class="cp-btn cp-btn-primary" style="width:100%">Collect Reddit Insights</button>
-        <p id="reddit-error" class="cp-error" hidden></p>
+      <p id="reddit-error" class="cp-error" hidden style="margin-top:8px"></p>
+      <div id="reddit-info-card" class="cp-card" hidden style="margin-top:8px">
+        <div id="reddit-summary" style="font-size:12px"></div>
       </div>
-      <div id="reddit-result-card" class="cp-card" hidden style="margin-top:8px">
-        <div class="cp-card-head">
-          <span class="cp-field-label">Collected Data</span>
-          <div class="cp-btn-cluster">
-            <button id="reddit-send-btn" class="cp-btn cp-btn-primary cp-btn-sm">Send to ContentPulse</button>
-            <button id="reddit-copy-btn" class="cp-btn cp-btn-secondary cp-btn-sm">Copy JSON</button>
+      <div id="reddit-synced-comments-card" class="cp-card" hidden style="margin-top:8px">
+        <div class="cp-card-head" style="margin-bottom:4px">
+          <span class="cp-card-label">Thread comments</span>
+        </div>
+        <div id="reddit-synced-comments-list" style="font-size:11px;max-height:150px;overflow-y:auto"></div>
+      </div>
+      <div id="reddit-note-card" class="cp-card" hidden style="margin-top:8px">
+        <div class="cp-card-head" style="display:flex;align-items:center;justify-content:space-between">
+          <span class="cp-field-label">Your draft comment for this post</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button id="reddit-copy-note-btn" class="cp-btn cp-btn-ghost cp-btn-sm" style="padding:2px 8px;font-size:11px" title="Copy comment">Copy</button>
+            <span id="reddit-note-sent-badge" hidden style="font-size:10px;color:#10b981;font-weight:600">Posted</span>
           </div>
         </div>
-        <p id="reddit-send-status" class="cp-help" hidden style="margin-top:4px"></p>
-        <div id="reddit-summary" style="margin-top:6px"></div>
-        <textarea id="reddit-json" class="cp-input" style="height:200px;font-size:11px;font-family:monospace;resize:vertical;margin-top:8px" readonly></textarea>
+        <p id="reddit-note-text" style="margin-top:6px;font-size:12px;white-space:pre-wrap;color:#64748b"></p>
+        <div id="reddit-mark-sent-area" style="margin-top:8px" hidden>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="reddit-comment-url-input" type="url" placeholder="Comment URL (auto-filled or paste)" style="flex:1;padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;outline:none;color:#334155">
+            <button id="reddit-mark-sent-btn" class="cp-btn cp-btn-primary cp-btn-sm" style="background:#10b981">Mark as sent</button>
+          </div>
+        </div>
+        <a id="reddit-comment-link" hidden target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;font-size:11px;color:#8b5cf6">View posted comment ↗</a>
+      </div>
+      <div id="reddit-drafts-card" class="cp-card" hidden style="margin-top:8px">
+        <div class="cp-card-head">
+          <span class="cp-field-label">Ready to publish</span>
+        </div>
+        <div id="reddit-drafts-list" style="margin-top:6px"></div>
       </div>
     </section>
 
@@ -319,6 +338,18 @@
             Change
           </button>
         </div>
+        <hr class="cp-divider" />
+        <div class="cp-settings-row cp-feature-row">
+          <div class="cp-settings-info">
+            <div class="cp-field-label">Scheduled editor auto-fill</div>
+            <div class="cp-field-sub">When enabled, opens and fills the matching LinkedIn, Medium, or Substack editor at the scheduled time. It never publishes.</div>
+          </div>
+          <label class="cp-toggle" title="Enable scheduled editor auto-fill">
+            <input id="scheduled-auto-fill-toggle" type="checkbox" />
+            <span class="cp-toggle-track" aria-hidden="true"></span>
+          </label>
+        </div>
+        <p id="scheduled-auto-fill-status" class="cp-help cp-settings-feature-status"></p>
       </div>
       <button id="disconnect-btn" class="cp-btn cp-btn-danger cp-btn-sm cp-settings-disconnect">Disconnect</button>
     </section>

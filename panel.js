@@ -9,8 +9,26 @@
   if (window.__cpPanelInjected) return;
   window.__cpPanelInjected = true;
 
-  const OPEN_KEY = 'cpPanelOpen';
+  // The Chrome Web Store build and an unpacked development build can both be
+  // installed. Content scripts run in separate isolated worlds, so shared
+  // IDs/markers make one build hide or control the other. Namespace every
+  // DOM node and its session key by the runtime id instead.
+  const runtimeId = String(chrome.runtime.id || 'unknown').replace(/[^a-z0-9_-]/gi, '-');
+  const fabId = `cp-panel-fab-${runtimeId}`;
+  const panelId = `cp-panel-${runtimeId}`;
+  const styleId = `cp-panel-fab-style-${runtimeId}`;
+  const OPEN_KEY = `cpPanelOpen:${runtimeId}`;
+  let hash = 0;
+  for (const char of runtimeId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const edgeOffset = (hash % 2) * 60;
   const Z = 2147483646;
+
+  // Remove an orphan from this same extension after an unpacked reload. This
+  // does not touch the store copy because its runtime id produces different
+  // node ids.
+  document.getElementById(fabId)?.remove();
+  document.getElementById(panelId)?.remove();
+  document.getElementById(styleId)?.remove();
 
   const logoUrl = chrome.runtime.getURL('assets/cp-logo-64.png');
   const panelUrl = chrome.runtime.getURL('popup.html?embedded=1');
@@ -21,16 +39,16 @@
   // pseudo-elements or !important page rules, so we ship our own !important
   // stylesheet and disable ::before/::after entirely.
   const guard = document.createElement('style');
-  guard.id = 'cp-panel-fab-style';
+  guard.id = styleId;
   guard.textContent = [
-    '#cp-panel-fab, #cp-panel-fab:hover, #cp-panel-fab:focus, #cp-panel-fab:focus-visible, #cp-panel-fab:active {',
+    `#${fabId}, #${fabId}:hover, #${fabId}:focus, #${fabId}:focus-visible, #${fabId}:active {`,
     '  background: #52227a !important;',
     '  background-image: none !important;',
     '  border: none !important;',
     '  outline: none !important;',
     '  box-shadow: 0 4px 14px rgba(0,0,0,.25) !important;',
     '}',
-    '#cp-panel-fab::before, #cp-panel-fab::after {',
+    `#${fabId}::before, #${fabId}::after {`,
     '  content: none !important;',
     '  display: none !important;',
     '}',
@@ -39,14 +57,14 @@
 
   // ── Floating bubble ──
   const fab = document.createElement('button');
-  fab.id = 'cp-panel-fab';
+  fab.id = fabId;
   fab.type = 'button';
   fab.title = 'Open ContentPulse Publisher';
   fab.setAttribute('aria-label', 'Open ContentPulse Publisher');
   fab.style.cssText = [
     'position:fixed',
     'top:35%',
-    'right:0',
+    `right:${edgeOffset}px`,
     `z-index:${Z}`,
     'width:52px',
     'height:48px',
@@ -76,11 +94,11 @@
 
   function buildPanel() {
     const wrap = document.createElement('div');
-    wrap.id = 'cp-panel';
+    wrap.id = panelId;
     wrap.style.cssText = [
       'position:fixed',
       'top:70px',
-      'right:14px',
+      `right:${14 + edgeOffset}px`,
       `z-index:${Z}`,
       'width:420px',
       'max-width:calc(100vw - 28px)',

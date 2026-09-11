@@ -11,7 +11,9 @@ the formatted / HTML version to paste anywhere.
 
 - **AI content, ready to ship** — pull scheduled & in‑review articles from your workspace.
 - **One‑click fill** — title, body, headings, links & images dropped into the editor.
+- **cp deep-link fill** — opening an editor URL with `?cp=<content ULID>` automatically loads and fills that exact article without opening the panel.
 - **SEO built in** — meta title, description, keywords & featured image come along.
+- **Scheduled editor assistance (opt-in)** — the toolbar badge shows today’s pending LinkedIn, Medium, and Substack items; when enabled in Settings, the matching editor opens and is filled at the scheduled time for final review.
 - **Reliable backup** — if an auto‑publish integration ever fails, copy formatted or HTML and paste into any platform.
 
 ## Install (unpacked / development)
@@ -62,7 +64,11 @@ one-click **Fill SEO on LinkedIn** action.
 
 ### 4. Settings
 
-Manage your connection from the gear icon in the Publish Queue header.
+Manage your connection from the gear icon in the Publish Queue header. The
+**Scheduled editor auto-fill** feature flag is off by default. When enabled, it
+uses the article's scheduled time to open and fill the relevant browser editor;
+it never clicks Publish. The ContentPulse toolbar icon shows the number of
+extension-channel articles scheduled for the current day.
 
 ![Settings](docs/settings.png)
 
@@ -83,7 +89,8 @@ the formatted content from being wiped by the editor's first re‑render.
 | `storage` | Save your session and publishing preferences locally. |
 | `tabs` | Open / target the editor tab to fill it. |
 | `scripting` | Inject the fill routine into the editor page. |
-| `host_permissions` for `contentpulse.io` and `linkedin.com` | Fetch your articles and fill the LinkedIn editor. |
+| `alarms` | Wake the extension at scheduled times and refresh the today badge. |
+| `host_permissions` for `contentpulse.io`, LinkedIn, Medium, and Substack | Fetch your articles and fill the supported publishing editors. |
 
 ## Project layout
 

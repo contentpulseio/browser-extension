@@ -11,6 +11,8 @@ const warn = (...args) => {
 const SCREENS = ['screen-boot', 'screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings', 'screen-reddit'];
 
 const APP_BASE_URL = 'https://app.contentpulse.io';
+const AUTO_FILL_SCHEDULED_KEY = 'cp_auto_fill_scheduled_enabled';
+const CONTENT_ID_PARAM = 'cp';
 
 // True when this page runs inside the in-page LinkedIn panel (iframe injected
 // by panel.js) instead of the toolbar popup.
@@ -126,6 +128,24 @@ function wordCount(text) {
   return t === '' ? 0 : t.split(/\s+/).length;
 }
 
+// A ContentPulse article URL can carry ?cp=<ULID>. Restrict the value to the
+// ULID alphabet/length so arbitrary query strings never become API paths.
+function contentIdFromUrl(url) {
+  if (!url) return '';
+  try {
+    const value = new URL(url).searchParams.get(CONTENT_ID_PARAM) || '';
+    return /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(value.trim()) ? value.trim().toUpperCase() : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function activeTabUrl() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.url || ''));
+  });
+}
+
 function formatDate(iso) {
   if (!iso) return null;
   const d = new Date(iso);
@@ -153,16 +173,16 @@ let selectedWebsiteId = null;
 let selectedPlatform = 'linkedin';
 
 const PLATFORMS = [
-  { id: 'linkedin', name: 'LinkedIn', live: true, icon: 'assets/platforms/linkedin.svg' },
-  { id: 'medium', name: 'Medium', live: false, icon: 'assets/platforms/medium.svg' },
-  { id: 'wordpress', name: 'WordPress', live: false, icon: 'assets/platforms/wordpress.svg' },
-  { id: 'webflow', name: 'Webflow', live: false, icon: 'assets/platforms/webflow.svg' },
-  { id: 'wix', name: 'Wix', live: false, icon: 'assets/platforms/wix.svg' },
-  { id: 'shopify', name: 'Shopify', live: false, icon: 'assets/platforms/shopify.svg' },
+  { id: 'linkedin', name: 'LinkedIn', live: true, icon: 'assets/platforms/linkedin.svg', urlPattern: 'linkedin.com' },
+  { id: 'medium', name: 'Medium', live: true, icon: 'assets/platforms/medium.svg', urlPattern: 'medium.com' },
+  { id: 'substack', name: 'Substack', live: true, icon: 'assets/platforms/substack.svg', urlPattern: 'substack.com' },
 ];
 
 const MARQUEE_PLATFORMS = [
   ...PLATFORMS,
+  { id: 'wordpress', name: 'WordPress', live: false, icon: 'assets/platforms/wordpress.svg' },
+  { id: 'webflow', name: 'Webflow', live: false, icon: 'assets/platforms/webflow.svg' },
+  { id: 'shopify', name: 'Shopify', live: false, icon: 'assets/platforms/shopify.svg' },
   { id: 'squarespace', name: 'Squarespace', live: false, icon: 'assets/platforms/squarespace.svg' },
   { id: 'bigcommerce', name: 'BigCommerce', live: false, icon: 'assets/platforms/bigcommerce.svg' },
   { id: 'hubspot', name: 'HubSpot', live: false, icon: 'assets/platforms/hubspot.svg' },
@@ -207,11 +227,11 @@ function selectedWebsiteLinkedInAuthor() {
   const match = websites.find((w) => w.id === selectedWebsiteId);
   return match?.linkedin_author || '';
 }
+
 function selectedWebsiteLinkedInAuthorUrn() {
   const match = websites.find((w) => w.id === selectedWebsiteId);
   return match?.linkedin_author_urn || '';
 }
-
 
 function creditCaption() {
   if (!selectedArticle) return '';
@@ -226,15 +246,16 @@ async function enterConnectedShell() {
   showScreen('screen-boot');
   await refreshAccount();
   await loadWebsites();
-  await loadArticles(selectedWebsiteId);
+  const openedDirectArticle = await loadArticles(selectedWebsiteId);
   if (!$('screen-onboarding').hidden) return; // session expired during boot
-  showTab('list');
+  if (!openedDirectArticle) showTab('list');
   showRedditBtnIfNeeded();
 
   if (IS_REDDIT_EMBED) {
     $('reddit-tools-btn').hidden = false;
-    checkRedditTab();
+    await checkRedditTab();
     showScreen('screen-reddit');
+    redditCollectAndSync();
   }
 }
 
@@ -368,16 +389,36 @@ async function loadArticles(websiteId = selectedWebsiteId) {
       await clearStored();
       enterDisconnectedShell();
       showOnboardingError('Your session expired. Please reconnect.');
-      return;
+      return false;
     }
     const el = $('list-error');
     el.textContent = res?.error || 'Failed to load articles.';
     el.hidden = false;
-    return;
+    return false;
   }
 
   currentArticles = res.articles || [];
+
+  // If the active editor/app URL identifies an article, load that exact
+  // article and open its detail screen. This also works for published content
+  // that is intentionally absent from the pending queue.
+  const directContentId = contentIdFromUrl(await activeTabUrl());
+  if (directContentId) {
+    const direct = await sendMessage({ action: 'getArticle', contentId: directContentId });
+    if (direct?.ok && direct.article) {
+      const article = direct.article;
+      if (!currentArticles.some((item) => String(item.id) === String(article.id))) {
+        currentArticles = [article, ...currentArticles];
+      }
+      renderArticleList();
+      openDetail(article);
+      return true;
+    }
+    warn('[ContentPulse][popup] direct article lookup failed', direct?.error || directContentId);
+  }
+
   renderArticleList();
+  return false;
 }
 
 function renderArticleList() {
@@ -459,9 +500,40 @@ function showDetailTab(tab) {
   }
 }
 
+function detectPlatformFromUrl(url) {
+  if (!url) return null;
+  for (const p of PLATFORMS) {
+    if (p.urlPattern && url.includes(p.urlPattern)) return p.id;
+  }
+  return null;
+}
+
+function platformIdFromArticle(article) {
+  const value = String(article?.platform || article?.publish_channel || '').trim().toLowerCase();
+  if (value === 'linkedin' || value === 'linkedin_pulse') return 'linkedin';
+  if (value === 'medium') return 'medium';
+  if (value === 'substack') return 'substack';
+  return null;
+}
+
 function openDetail(article) {
   selectedArticle = article;
-  selectedPlatform = (PLATFORMS.find((p) => p.live) || PLATFORMS[0]).id;
+  const articlePlatform = platformIdFromArticle(article);
+  selectedPlatform = articlePlatform || (PLATFORMS.find((p) => p.live) || PLATFORMS[0]).id;
+  const initialPlatform = selectedPlatform;
+
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const detected = detectPlatformFromUrl(tabs[0]?.url);
+    // Do not let the asynchronous tab probe overwrite a platform the user
+    // selected while the detail view was opening.
+    if (!articlePlatform && detected && selectedPlatform === initialPlatform && selectedArticle === article) {
+      selectedPlatform = detected;
+      const select = $('platform-select');
+      if (select) select.value = detected;
+      renderPlatformAction();
+    }
+  });
+
   $('detail-error').hidden = true;
   showDetailTab('publish');
 
@@ -498,16 +570,13 @@ function openDetail(article) {
   showScreen('screen-detail');
 }
 
-// The platform picker is a select box (was a row of pill tabs) so the list can
-// grow without crowding the popup. Live platforms are marked; the rest read as
-// coming soon.
 function renderPlatformTabs() {
   const select = $('platform-select');
   select.innerHTML = '';
   for (const platform of PLATFORMS) {
     const option = document.createElement('option');
     option.value = platform.id;
-    option.textContent = platform.live ? `${platform.name} — Live` : `${platform.name} (coming soon)`;
+    option.textContent = platform.name;
     select.appendChild(option);
   }
   select.value = selectedPlatform;
@@ -517,21 +586,11 @@ function renderPlatformAction() {
   const wrap = $('platform-action');
   wrap.innerHTML = '';
   const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
+  wrap.hidden = true;
 
-  // Live platforms explain themselves via the "i" button next to Fill in
-  // editor; the inline card only appears for coming-soon platforms.
-  if (platform.live) {
-    wrap.hidden = true;
-  } else {
-    const note = document.createElement('p');
-    note.className = 'cp-help cp-platform-soon';
-    note.textContent = `Direct fill for ${platform.name} is coming soon.`;
-    wrap.appendChild(note);
-    wrap.hidden = false;
-  }
-
-  $('fill-info-text').textContent =
-    `"Fill in editor" drops the title, body and cover image into ${platform.name}, and checks the right profile/page is selected. The Content and SEO tabs hold everything to copy.`;
+  $('fill-info-text').textContent = platform.id === 'medium'
+    ? `"Fill in editor" opens ${platform.name}'s story editor and pastes the title, body, hero image, inline images, captions, and SEO text. The Content tab holds everything to copy.`
+    : `"Fill in editor" drops the title, body and cover image into ${platform.name}, and checks the right profile/page is selected. The Content and SEO tabs hold everything to copy.`;
   $('fill-info-text').hidden = true;
 
   updateFillButton();
@@ -611,10 +670,11 @@ async function handleFillSharePost() {
 // Maps a popup platform tab to the backend publication platform. Only the
 // extension-published, API-less channels (LinkedIn Pulse / Medium) accept a
 // recorded URL; CMS platforms publish via their own API so they are excluded.
-const PUBLISH_PLATFORM_MAP = { linkedin: 'linkedin_pulse', medium: 'medium' };
+const PUBLISH_PLATFORM_MAP = { linkedin: 'linkedin_pulse', medium: 'medium', substack: 'substack' };
 
 function backendPlatformFor(platformId) {
-  return PUBLISH_PLATFORM_MAP[platformId] || null;
+  const normalized = String(platformId || '').trim().toLowerCase();
+  return PUBLISH_PLATFORM_MAP[normalized] || null;
 }
 
 // Shows the "Published link" capture/paste card for channels we can record, and
@@ -646,10 +706,8 @@ function updateFillButton() {
   const btn = $('fill-btn');
   if (!btn) return;
   const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
-  btn.disabled = !platform.live;
-  btn.title = platform.live
-    ? `Fill the ${platform.name} editor`
-    : `Direct fill for ${platform.name} is coming soon. Use the copy buttons below.`;
+  btn.disabled = false;
+  btn.title = `Fill the ${platform.name} editor`;
 }
 
 async function handleDownloadImage() {
@@ -710,20 +768,25 @@ async function copyPlainText(text) {
   }
 }
 
+async function prepareFormattedClipboard(html) {
+  if (!navigator.clipboard || !window.ClipboardItem) return false;
+  try {
+    const safeHtml = html || '';
+    const item = new ClipboardItem({
+      'text/html': new Blob([safeHtml], { type: 'text/html' }),
+      'text/plain': new Blob([htmlToText(safeHtml)], { type: 'text/plain' }),
+    });
+    await navigator.clipboard.write([item]);
+    return true;
+  } catch (err) {
+    warn('[ContentPulse][popup] rich clipboard preparation failed', err);
+    return false;
+  }
+}
+
 async function copyFormattedHtml(html) {
   const safeHtml = html || '';
-  try {
-    if (navigator.clipboard && window.ClipboardItem) {
-      const item = new ClipboardItem({
-        'text/html': new Blob([safeHtml], { type: 'text/html' }),
-        'text/plain': new Blob([htmlToText(safeHtml)], { type: 'text/plain' }),
-      });
-      await navigator.clipboard.write([item]);
-      return true;
-    }
-  } catch (err) {
-    warn('[ContentPulse][popup] clipboard html failed, falling back to text', err);
-  }
+  if (await prepareFormattedClipboard(safeHtml)) return true;
   return copyPlainText(safeHtml);
 }
 
@@ -815,21 +878,35 @@ async function handleFill() {
   if (!selectedArticle) return;
   $('detail-error').hidden = true;
 
+  const backendPlatform = backendPlatformFor(selectedPlatform);
+  if (!backendPlatform) {
+    $('detail-error').textContent = 'Choose a supported publishing platform before filling the editor.';
+    $('detail-error').hidden = false;
+    return;
+  }
+
   log('[ContentPulse][popup] fill ->', selectedArticle.title);
+  // LinkedIn only imports headings/lists/quotes when its trusted browser paste
+  // path runs. Prepare the same text/html + text/plain clipboard payload used
+  // by the manual "Copy formatted" action before invoking the background fill.
+  // The injected page routine attempts native paste first, then keeps its
+  // existing TipTap/HTML fallbacks for browsers that disallow execCommand paste.
+  const clipboardPrepared = await prepareFormattedClipboard(selectedArticle.body_html);
   const res = await sendMessage({
     action: 'openAndFill',
     article: {
       id: selectedArticle.id,
       title: selectedArticle.title,
       body_html: selectedArticle.body_html,
-      platform: backendPlatformFor(selectedPlatform) || 'linkedin_pulse',
-      // Open the editor directly as the configured LinkedIn company/profile.
-      publish_as_urn: selectedWebsiteLinkedInAuthorUrn(),
+      clipboard_prepared: clipboardPrepared,
+      platform: backendPlatform,
       // Needed by the background to arm the share-dialog auto-fill.
       share_post: selectedArticle.share_post || null,
       // Connected LinkedIn profile/page of the article's website - the
       // background checks the editor's "Publish as" selector against it.
       publish_as: selectedWebsiteLinkedInAuthor(),
+      // Open the editor directly as the configured LinkedIn company/profile.
+      publish_as_urn: selectedWebsiteLinkedInAuthorUrn(),
       // Featured image - dropped into LinkedIn's cover image input.
       image_url: selectedArticle.image_url || null,
       // Filled into the cover's "Add credit and caption" field after the image.
@@ -842,6 +919,14 @@ async function handleFill() {
             meta_description: selectedArticle.seo.meta_description || '',
           }
         : null,
+      // Tags and categories - used by Medium for "Reader Interests" (up to 5).
+      tags: selectedArticle.tags || [],
+      categories: selectedArticle.categories || [],
+      // Canonical URL for cross-posted content (Medium "More settings").
+      article_url: selectedArticle.article_url || null,
+      // Substack publication slug/domain used when the scheduled flow needs
+      // to open a new editor instead of filling an already-open one.
+      substack_domain: selectedArticle.substack_domain || '',
     },
   });
 
@@ -849,7 +934,8 @@ async function handleFill() {
     closeUi();
   } else {
     const el = $('detail-error');
-    el.textContent = res?.error || 'Could not open the LinkedIn editor.';
+    const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
+    el.textContent = res?.error || `Could not open the ${platform.name} editor.`;
     el.hidden = false;
   }
 }
@@ -1035,10 +1121,22 @@ async function handleFillImage() {
 }
 
 async function renderSettings() {
-  const { user, apiKey } = await getStored(['user', 'apiKey']);
+  const { user, apiKey, [AUTO_FILL_SCHEDULED_KEY]: autoFillEnabled } = await getStored([
+    'user',
+    'apiKey',
+    AUTO_FILL_SCHEDULED_KEY,
+  ]);
   $('settings-name').textContent = user?.name || 'Unknown user';
   $('settings-email').textContent = user?.email || '';
   $('settings-key').textContent = apiKey ? `••••••••${apiKey.slice(-4)}` : 'Not set';
+  const toggle = $('scheduled-auto-fill-toggle');
+  if (toggle) toggle.checked = autoFillEnabled === true;
+  const status = $('scheduled-auto-fill-status');
+  if (status) {
+    status.textContent = autoFillEnabled === true
+      ? 'Feature flag on. The icon badge shows how many extension articles are scheduled for today.'
+      : 'Feature flag off. Turn this on to enable time-based editor filling.';
+  }
 }
 
 // In-extension confirm dialog (window.confirm/alert are blocked or ugly in the
@@ -1105,24 +1203,20 @@ async function handleDisconnect() {
 }
 
 let redditTabId = null;
+let redditLastPayload = null;
 
 async function checkRedditTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = tab?.url || '';
     const isReddit = url.includes('reddit.com/r/');
-    $('reddit-tab-info').textContent = isReddit
-      ? `Active tab: ${url.split('?')[0]}`
-      : 'Navigate to a Reddit subreddit or post page first.';
-    $('reddit-extract-btn').disabled = !isReddit;
     redditTabId = isReddit ? tab.id : null;
 
     if (isReddit) {
       $('reddit-tools-btn').hidden = false;
     }
-  } catch (e) {
-    $('reddit-tab-info').textContent = 'Could not detect active tab.';
-    $('reddit-extract-btn').disabled = true;
+  } catch (_e) {
+    redditTabId = null;
   }
 }
 
@@ -1132,206 +1226,310 @@ async function showRedditBtnIfNeeded() {
     if (tab?.url?.includes('reddit.com/r/')) {
       $('reddit-tools-btn').hidden = false;
     }
-  } catch (e) {}
+  } catch (_e) {}
 }
 
-async function handleRedditExtract() {
-  if (!redditTabId) return;
-  const btn = $('reddit-extract-btn');
-  const err = $('reddit-error');
-  err.hidden = true;
-  btn.textContent = 'Collecting…';
-  btn.disabled = true;
+function redditExtractFunc() {
+  function extractSubredditInfo() {
+    const header = document.querySelector('shreddit-subreddit-header');
+    if (!header) return null;
+    const name = header.getAttribute('name') || header.getAttribute('prefixed-name')?.replace('r/', '') || null;
+    return {
+      name,
+      title: header.querySelector('#title')?.textContent?.trim() || name,
+      description: header.querySelector('#description')?.textContent?.trim() || document.querySelector('#description')?.textContent?.trim() || document.querySelector('.i18n-subreddit-description')?.textContent?.trim() || '',
+      subscribers: header.querySelector('[slot="subscribers-count"]')?.textContent?.trim() || null,
+      weekly_visitors: parseInt(header.getAttribute('weekly-active-users') || '0', 10),
+      weekly_contributions: parseInt(header.getAttribute('weekly-contributions') || '0', 10),
+    };
+  }
+  function extractRules() {
+    const rules = [];
+    const allH2 = document.querySelectorAll('h2');
+    let container = null;
+    for (const h2 of allH2) {
+      if (h2.textContent?.includes('Rules')) { container = h2.closest('.px-md') || h2.parentElement; break; }
+    }
+    if (!container) return rules;
+    container.querySelectorAll('faceplate-expandable-section-helper').forEach((section) => {
+      const numberEl = section.querySelector('.text-neutral-content-weak.text-14.font-normal');
+      const titleEl = section.querySelector('h2.i18n-translatable-text');
+      const descEl = section.querySelector('.i18n-translatable-text.ms-xl .md p');
+      const ruleTitle = titleEl?.textContent?.trim() || '';
+      if (ruleTitle) rules.push({ number: parseInt(numberEl?.textContent?.trim() || '', 10) || rules.length + 1, title: ruleTitle, description: descEl?.textContent?.trim() || '' });
+    });
+    return rules;
+  }
+  function extractPostData() {
+    const post = document.querySelector('shreddit-post');
+    if (!post) return null;
+    const titleEl = document.querySelector('[id^="post-title-"]');
+    const bodyEl = post.querySelector('[slot="text-body"] .md');
+    return { id: post.getAttribute('id') || null, title: titleEl?.textContent?.trim() || post.getAttribute('post-title') || '', author: post.getAttribute('author') || '', subreddit: post.getAttribute('subreddit-prefixed-name') || '', score: parseInt(post.getAttribute('score') || '0', 10), comment_count: parseInt(post.getAttribute('comment-count') || '0', 10), created: post.getAttribute('created-timestamp') || null, permalink: post.getAttribute('permalink') || null, post_type: post.getAttribute('post-type') || 'text', body: bodyEl?.textContent?.trim() || null };
+  }
+  function extractComments() {
+    const comments = [];
+    document.querySelectorAll('shreddit-comment').forEach((el) => {
+      const author = el.getAttribute('author') || '';
+      const body = el.querySelector('.md')?.textContent?.trim() || '';
+      if (author && body && author !== 'AutoModerator') {
+        comments.push({ id: el.getAttribute('thingid') || '', author, body, score: parseInt(el.getAttribute('score') || '0', 10), depth: parseInt(el.getAttribute('depth') || '0', 10), created: el.getAttribute('created') || null, permalink: el.getAttribute('permalink') ? 'https://www.reddit.com' + el.getAttribute('permalink') : null });
+      }
+    });
+    return comments;
+  }
+  function detectLoggedInUser() {
+    const el = document.querySelector('achievements-entrypoint[username]') ||
+               document.querySelector('after-login-toast-dispatcher[username]');
+    return el?.getAttribute('username') || null;
+  }
+  const url = window.location.href;
+  const isPost = url.includes('/comments/');
+  const result = { collected_at: new Date().toISOString(), url, page_type: isPost ? 'post' : 'subreddit', subreddit: extractSubredditInfo(), rules: extractRules(), logged_in_username: detectLoggedInUser() };
+  if (isPost) { result.post = extractPostData(); result.comments = extractComments(); }
+  return result;
+}
+
+async function redditCollectAndSync() {
+  if (!redditTabId) {
+    $('reddit-sync-status').textContent = 'Open a Reddit community or post to sync.';
+    return;
+  }
+  const errEl = $('reddit-error');
+  errEl.hidden = true;
+  $('reddit-sync-status').textContent = 'Syncing with ContentPulse...';
+  $('reddit-info-card').hidden = true;
+  $('reddit-note-card').hidden = true;
+  $('reddit-drafts-card').hidden = true;
+  $('reddit-synced-comments-card').hidden = true;
 
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: redditTabId },
-      func: () => {
-        function extractSubredditInfo() {
-          const header = document.querySelector('shreddit-subreddit-header');
-          if (!header) return null;
-          const name = header.getAttribute('name') || header.getAttribute('prefixed-name')?.replace('r/', '') || null;
-          return {
-            name,
-            title: header.querySelector('#title')?.textContent?.trim() || name,
-            description: header.querySelector('#description')?.textContent?.trim() || document.querySelector('#description')?.textContent?.trim() || document.querySelector('.i18n-subreddit-description')?.textContent?.trim() || '',
-            subscribers: header.querySelector('[slot="subscribers-count"]')?.textContent?.trim() || null,
-            weekly_visitors: parseInt(header.getAttribute('weekly-active-users') || '0', 10),
-            weekly_contributions: parseInt(header.getAttribute('weekly-contributions') || '0', 10),
-          };
-        }
-
-        function extractRules() {
-          const rules = [];
-          const allH2 = document.querySelectorAll('h2');
-          let container = null;
-          for (const h2 of allH2) {
-            if (h2.textContent?.includes('Rules')) {
-              container = h2.closest('.px-md') || h2.parentElement;
-              break;
-            }
-          }
-          if (!container) return rules;
-          container.querySelectorAll('faceplate-expandable-section-helper').forEach((section) => {
-            const numberEl = section.querySelector('.text-neutral-content-weak.text-14.font-normal');
-            const titleEl = section.querySelector('h2.i18n-translatable-text');
-            const descEl = section.querySelector('.i18n-translatable-text.ms-xl .md p');
-            const ruleTitle = titleEl?.textContent?.trim() || '';
-            if (ruleTitle) {
-              rules.push({
-                number: parseInt(numberEl?.textContent?.trim() || '', 10) || rules.length + 1,
-                title: ruleTitle,
-                description: descEl?.textContent?.trim() || '',
-              });
-            }
-          });
-          return rules;
-        }
-
-        function extractPostData() {
-          const post = document.querySelector('shreddit-post');
-          if (!post) return null;
-          const titleEl = document.querySelector('[id^="post-title-"]');
-          const bodyEl = post.querySelector('[slot="text-body"] .md');
-          return {
-            id: post.getAttribute('id') || null,
-            title: titleEl?.textContent?.trim() || post.getAttribute('post-title') || '',
-            author: post.getAttribute('author') || '',
-            subreddit: post.getAttribute('subreddit-prefixed-name') || '',
-            score: parseInt(post.getAttribute('score') || '0', 10),
-            comment_count: parseInt(post.getAttribute('comment-count') || '0', 10),
-            created: post.getAttribute('created-timestamp') || null,
-            permalink: post.getAttribute('permalink') || null,
-            post_type: post.getAttribute('post-type') || 'text',
-            body: bodyEl?.textContent?.trim() || null,
-          };
-        }
-
-        function extractComments() {
-          const comments = [];
-          document.querySelectorAll('shreddit-comment').forEach((el) => {
-            const author = el.getAttribute('author') || '';
-            const body = el.querySelector('.md')?.textContent?.trim() || '';
-            if (author && body && author !== 'AutoModerator') {
-              comments.push({
-                id: el.getAttribute('thingid') || '',
-                author,
-                body,
-                score: parseInt(el.getAttribute('score') || '0', 10),
-                depth: parseInt(el.getAttribute('depth') || '0', 10),
-                created: el.getAttribute('created') || null,
-                permalink: el.getAttribute('permalink') ? 'https://www.reddit.com' + el.getAttribute('permalink') : null,
-              });
-            }
-          });
-          return comments;
-        }
-
-        const url = window.location.href;
-        const isPost = url.includes('/comments/');
-        const result = {
-          collected_at: new Date().toISOString(),
-          url,
-          page_type: isPost ? 'post' : 'subreddit',
-          subreddit: extractSubredditInfo(),
-          rules: extractRules(),
-        };
-        if (isPost) {
-          result.post = extractPostData();
-          result.comments = extractComments();
-        }
-        return result;
-      },
-    });
-
+    const results = await chrome.scripting.executeScript({ target: { tabId: redditTabId }, func: redditExtractFunc });
     const data = results?.[0]?.result;
     if (!data) {
-      err.textContent = 'No data found. Make sure you are on a Reddit community or post page.';
-      err.hidden = false;
-      btn.textContent = 'Collect Reddit Insights';
-      btn.disabled = false;
+      errEl.textContent = 'No data found. Make sure you are on a Reddit community or post page.';
+      errEl.hidden = false;
+      $('reddit-sync-status').textContent = 'Could not sync.';
       return;
     }
 
-    const json = JSON.stringify(data, null, 2);
-    $('reddit-json').value = json;
-    $('reddit-result-card').hidden = false;
+    redditLastPayload = data;
+
+    if (selectedWebsiteId) {
+      data.website_id = selectedWebsiteId;
+    }
+
+    const res = await sendMessage({ action: 'redditIngest', payload: data });
 
     let summary = '';
     if (data.subreddit) {
       summary += `<strong>r/${data.subreddit.name}</strong>`;
-      if (data.subreddit.subscribers) summary += ` · ${data.subreddit.subscribers} members`;
-      if (data.subreddit.weekly_visitors) summary += ` · ${data.subreddit.weekly_visitors.toLocaleString()} weekly visitors`;
+      if (data.subreddit.subscribers) summary += ` &middot; ${data.subreddit.subscribers} members`;
+      if (data.subreddit.weekly_visitors) summary += ` &middot; ${data.subreddit.weekly_visitors.toLocaleString()} weekly visitors`;
+      if (data.subreddit.weekly_contributions) summary += ` &middot; ${data.subreddit.weekly_contributions.toLocaleString()} weekly posts`;
       summary += '<br>';
     }
-    if (data.rules?.length) summary += `${data.rules.length} rules found<br>`;
-    if (data.post) summary += `Post: "${data.post.title}" (${data.post.score} upvotes, ${data.post.comment_count} comments)<br>`;
-    if (data.comments?.length) summary += `${data.comments.length} comments collected`;
-    $('reddit-summary').innerHTML = summary || 'Data collected.';
-
-    btn.textContent = 'Collect Reddit Insights';
-    btn.disabled = false;
-  } catch (e) {
-    err.textContent = e.message || 'Could not collect data from this page.';
-    err.hidden = false;
-    btn.textContent = 'Collect Reddit Insights';
-    btn.disabled = false;
-  }
-}
-
-function handleRedditCopy() {
-  const json = $('reddit-json').value;
-  if (!json) return;
-  navigator.clipboard.writeText(json).then(() => {
-    const btn = $('reddit-copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy JSON'; }, 2000);
-  });
-}
-
-async function handleRedditSend() {
-  const json = $('reddit-json').value;
-  if (!json) return;
-
-  const btn = $('reddit-send-btn');
-  const status = $('reddit-send-status');
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
-  status.hidden = true;
-
-  try {
-    const payload = JSON.parse(json);
-
-    const res = await sendMessage({ action: 'redditIngest', payload });
+    if (data.rules?.length) summary += `${data.rules.length} community rules<br>`;
+    if (data.post) summary += `Post: "${data.post.title}" (${data.post.score} upvotes)<br>`;
+    if (data.comments?.length) {
+      summary += `${data.comments.length} comments synced<br>`;
+      renderSyncedComments(data.comments, res?.data?.updated, data.logged_in_username);
+    }
 
     if (res && res.ok) {
       const d = res.data?.updated || {};
-      let msg = 'Saved to ContentPulse.';
-      if (d.subreddit) {
-        const count = d.subreddit_count || 1;
-        msg += ` r/${d.subreddit} updated across ${count} website${count > 1 ? 's' : ''}.`;
+      summary += '<span style="color:#22c55e">Synced to ContentPulse</span>';
+
+      if (d.admin_note) {
+        $('reddit-note-text').textContent = d.admin_note;
+        $('reddit-note-card').hidden = false;
+
+        if (d.comment_posted_at) {
+          $('reddit-note-sent-badge').hidden = false;
+          $('reddit-mark-sent-area').hidden = true;
+          if (d.comment_posted_url) {
+            $('reddit-comment-link').href = d.comment_posted_url;
+            $('reddit-comment-link').hidden = false;
+          }
+        } else {
+          $('reddit-mark-sent-area').hidden = false;
+          $('reddit-mark-sent-area').dataset.oppId = d.ulid || d.id || '';
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]?.url) $('reddit-comment-url-input').value = tabs[0].url;
+          });
+        }
       }
-      if (d.opportunity) msg += ` Opportunity updated with ${d.comments_count || 0} comments.`;
-      if (!d.subreddit && !d.opportunity) msg += ' No matching records found to update.';
-      status.textContent = msg;
-      status.style.color = '#22c55e';
+
+      const drafts = res.data?.ready_drafts || [];
+      renderReadyDrafts(drafts);
     } else {
-      status.textContent = res?.error || 'Failed to send data.';
-      status.style.color = '#ef4444';
+      summary += '<span style="color:#f59e0b">Collected but not synced (no matching record)</span>';
     }
-    status.hidden = false;
+
+    $('reddit-summary').innerHTML = summary;
+    $('reddit-info-card').hidden = false;
+    $('reddit-sync-status').textContent = 'Synced';
   } catch (e) {
-    status.textContent = e.message || 'Error sending data.';
-    status.style.color = '#ef4444';
-    status.hidden = false;
+    errEl.textContent = e.message || 'Could not collect data from this page.';
+    errEl.hidden = false;
+    $('reddit-sync-status').textContent = 'Sync failed.';
+  }
+}
+
+function renderReadyDrafts(drafts) {
+  const card = $('reddit-drafts-card');
+  const list = $('reddit-drafts-list');
+  list.innerHTML = '';
+
+  if (!drafts || drafts.length === 0) {
+    card.hidden = true;
+    return;
   }
 
-  btn.textContent = 'Send to ContentPulse';
+  for (const draft of drafts) {
+    const item = document.createElement('div');
+    item.style.cssText = 'padding:6px 0;border-bottom:1px solid #f1f5f9';
+
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px';
+
+    const titleLink = document.createElement('a');
+    titleLink.href = draft.reddit_url || '#';
+    titleLink.target = '_blank';
+    titleLink.rel = 'noopener';
+    titleLink.textContent = draft.title || 'Untitled';
+    titleLink.style.cssText = 'font-size:12px;font-weight:600;color:#1e293b;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+
+    const cpLink = document.createElement('a');
+    cpLink.href = draft.dashboard_url || '#';
+    cpLink.target = '_blank';
+    cpLink.rel = 'noopener';
+    cpLink.title = 'Open in ContentPulse';
+    cpLink.textContent = 'CP';
+    cpLink.style.cssText = 'font-size:9px;font-weight:700;color:#fff;background:#52227a;padding:2px 5px;border-radius:4px;text-decoration:none;flex-shrink:0';
+
+    titleRow.appendChild(titleLink);
+    titleRow.appendChild(cpLink);
+
+    const noteEl = document.createElement('p');
+    noteEl.textContent = draft.admin_note;
+    noteEl.style.cssText = 'font-size:11px;color:#64748b;margin:0;white-space:pre-wrap;max-height:60px;overflow:hidden';
+
+    item.appendChild(titleRow);
+    item.appendChild(noteEl);
+    list.appendChild(item);
+  }
+
+  card.hidden = false;
+}
+
+function renderSyncedComments(comments, updatedOpp, loggedInUsername) {
+  const list = $('reddit-synced-comments-list');
+  const card = $('reddit-synced-comments-card');
+  if (!list || !comments?.length) { if (card) card.hidden = true; return; }
+
+  const oppId = updatedOpp?.ulid || updatedOpp?.id || '';
+  const alreadySent = !!updatedOpp?.comment_posted_at;
+
+  const displayComments = loggedInUsername
+    ? comments.filter((c) => (c.author || '').toLowerCase() === loggedInUsername.toLowerCase())
+    : comments;
+
+  if (!displayComments.length) { if (card) card.hidden = true; return; }
+
+  list.innerHTML = displayComments.slice(0, 15).map((c) => {
+    const author = c.author || 'unknown';
+    const text = (c.comment || c.body || '').slice(0, 120);
+    const url = c.permalink || c.url || '';
+    const canClaim = !alreadySent && oppId && url;
+    const checkIcon = canClaim
+      ? `<button class="reddit-claim-comment-btn" data-opp-id="${oppId}" data-url="${url}" title="Mark as my comment" style="background:none;border:none;cursor:pointer;padding:0;line-height:1;color:#10b981;font-size:14px;flex-shrink:0">&#10003;</button>`
+      : '';
+    return `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;gap:4px">
+      ${checkIcon}
+      <div style="flex:1;min-width:0"><strong style="color:#6366f1">u/${author}</strong> <span style="color:#94a3b8">${text}${text.length >= 120 ? '...' : ''}</span></div>
+    </div>`;
+  }).join('');
+
+  card.hidden = false;
+
+  list.querySelectorAll('.reddit-claim-comment-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const oid = btn.dataset.oppId;
+      const curl = btn.dataset.url;
+      btn.disabled = true;
+      btn.textContent = '\u23F3';
+      const res = await sendMessage({ action: 'markCommentSent', oppId: oid, commentUrl: curl });
+      if (res && res.ok) {
+        btn.textContent = '\u2714';
+        btn.style.color = '#22c55e';
+        btn.disabled = true;
+        $('reddit-mark-sent-area').hidden = true;
+        $('reddit-note-sent-badge').hidden = false;
+        if (curl) {
+          $('reddit-comment-link').href = curl;
+          $('reddit-comment-link').hidden = false;
+        }
+        list.querySelectorAll('.reddit-claim-comment-btn').forEach((b) => { b.disabled = true; b.textContent = ''; b.style.cursor = 'default'; });
+      } else {
+        btn.textContent = '\u2717';
+        btn.style.color = '#ef4444';
+      }
+    });
+  });
+}
+
+async function handleMarkCommentSent() {
+  const area = $('reddit-mark-sent-area');
+  const btn = $('reddit-mark-sent-btn');
+  const urlInput = $('reddit-comment-url-input');
+  const oppId = area.dataset.oppId;
+
+  if (!oppId) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  const commentUrl = (urlInput?.value || '').trim();
+  const res = await sendMessage({ action: 'markCommentSent', oppId, commentUrl });
+
+  if (res && res.ok) {
+    area.hidden = true;
+    $('reddit-note-sent-badge').hidden = false;
+    if (commentUrl) {
+      $('reddit-comment-link').href = commentUrl;
+      $('reddit-comment-link').hidden = false;
+    }
+  } else {
+    btn.textContent = 'Failed - retry';
+  }
   btn.disabled = false;
 }
 
+function showInitError(error) {
+  const boot = $('screen-boot');
+  if (!boot) return;
+  const message = error instanceof Error ? error.message : String(error || 'Unknown initialization error');
+  boot.hidden = false;
+  boot.innerHTML = '';
+  const inner = document.createElement('div');
+  inner.className = 'cp-boot-inner';
+  const title = document.createElement('strong');
+  title.textContent = 'Publisher could not load';
+  const detail = document.createElement('p');
+  detail.className = 'cp-boot-text';
+  detail.textContent = IS_EMBEDDED
+    ? 'Reload the page once to reconnect the publisher panel.'
+    : 'Reload the extension and try again.';
+  const diagnostic = document.createElement('small');
+  diagnostic.className = 'cp-help';
+  diagnostic.textContent = message;
+  inner.append(title, detail, diagnostic);
+  boot.appendChild(inner);
+  console.error('[ContentPulse][popup] initialization failed', error);
+}
 
-async function init() {
+async function initImpl() {
   renderMarquee();
   $('save-connect-btn').addEventListener('click', handleSaveConnect);
   $('api-key-input').addEventListener('keydown', (e) => {
@@ -1341,14 +1539,38 @@ async function init() {
   $('website-select').addEventListener('change', handleWebsiteChange);
   $('settings-btn').addEventListener('click', () => showTab('settings'));
   $('settings-back-btn').addEventListener('click', () => showTab('list'));
-  $('reddit-tools-btn').addEventListener('click', () => {
+  $('scheduled-auto-fill-toggle').addEventListener('change', async (event) => {
+    const toggle = event.currentTarget;
+    const enabled = toggle.checked;
+    toggle.disabled = true;
+    const res = await sendMessage({ action: 'setScheduledAutoFill', enabled });
+    toggle.disabled = false;
+    if (!res || !res.ok) {
+      toggle.checked = !enabled;
+      $('scheduled-auto-fill-status').textContent = res?.error || 'Could not update the feature flag.';
+      return;
+    }
+    $('scheduled-auto-fill-status').textContent = enabled
+      ? 'Feature flag on. The icon badge shows how many extension articles are scheduled for today.'
+      : 'Feature flag off. Scheduled editor filling is disabled.';
+  });
+  $('reddit-tools-btn').addEventListener('click', async () => {
     showScreen('screen-reddit');
-    checkRedditTab();
+    await checkRedditTab();
+    redditCollectAndSync();
   });
   $('reddit-back-btn').addEventListener('click', () => showTab('list'));
-  $('reddit-extract-btn').addEventListener('click', handleRedditExtract);
-  $('reddit-copy-btn').addEventListener('click', handleRedditCopy);
-  $('reddit-send-btn').addEventListener('click', handleRedditSend);
+  $('reddit-mark-sent-btn').addEventListener('click', handleMarkCommentSent);
+  $('reddit-copy-note-btn').addEventListener('click', () => {
+    const text = $('reddit-note-text').textContent || '';
+    if (text) {
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = $('reddit-copy-note-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+    }
+  });
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
   $('schedule-btn').addEventListener('click', handleSchedule);
@@ -1408,4 +1630,26 @@ async function init() {
   await enterConnectedShell();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+async function init() {
+  try {
+    await initImpl();
+  } catch (error) {
+    showInitError(error);
+  }
+}
+
+window.addEventListener('error', (event) => {
+  if (event?.error) showInitError(event.error);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  if (event?.reason) showInitError(event.reason);
+});
+
+// A panel iframe can be restored from the browser's page cache with the DOM
+// already ready. In that case a DOMContentLoaded-only bootstrap never runs
+// and all sections remain in their initial state. Start in either lifecycle.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}

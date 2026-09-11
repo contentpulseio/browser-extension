@@ -13,6 +13,7 @@ log('[ContentPulse][cs] content script loaded on', location.href);
 
 const MAX_ATTEMPTS = 10;
 const ATTEMPT_INTERVAL_MS = 500;
+const CP_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 
 const TITLE_SELECTORS = [
   '#article-editor-headline__textarea',
@@ -161,6 +162,48 @@ function requestPageFill(title, bodyHtml, bodyText) {
   });
 }
 
+function requestRuntime(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (res) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(res || { ok: false });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
+  });
+}
+
+function contentIdFromUrl() {
+  try {
+    const id = new URL(location.href).searchParams.get('cp')?.trim() || '';
+    return CP_ID_RE.test(id) ? id.toUpperCase() : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+async function autoFillFromContentId() {
+  const contentId = contentIdFromUrl();
+  if (!contentId || window.__cpDirectAutoFillStarted) return;
+  window.__cpDirectAutoFillStarted = true;
+  log('[ContentPulse][cs] cp deep link detected, requesting direct fill', contentId);
+
+  const result = await requestRuntime({ action: 'autoFillFromContentId', contentId });
+  if (!result?.ok) {
+    window.__cpDirectAutoFillStarted = false;
+    warn('[ContentPulse][cs] cp deep-link fill failed', result?.error || contentId);
+    showToast(`ContentPulse: Could not load article ${contentId}`, false);
+    return;
+  }
+
+  showToast('ContentPulse: Article loaded from the cp link and filling now', true);
+}
+
 async function fillArticle(article) {
   log('[ContentPulse][cs] fillArticle', article?.title);
   const title = article?.title || '';
@@ -212,3 +255,9 @@ window.addEventListener('message', (event) => {
     fillArticle(data.article);
   }
 });
+
+// A LinkedIn editor URL carrying ?cp=<ULID> is an explicit fill request. Run
+// this at document idle so the user does not need to open the extension panel
+// or click Fill in editor; the background fetches the exact article and runs
+// the same formatted-body/image/caption/SEO pipeline as the popup.
+autoFillFromContentId();
