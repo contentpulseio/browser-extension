@@ -1219,6 +1219,13 @@ function cpPageFill(titleText, bodyHtml, bodyText, isFreshTab, useSystemClipboar
           window.scrollTo(0, 0);
           document.documentElement.scrollTop = 0;
           document.body.scrollTop = 0;
+          const editors = document.querySelectorAll('[contenteditable="true"], textarea, input');
+          editors.forEach((editor) => {
+            let parent = editor.parentElement;
+            for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
+              if (parent.scrollHeight > parent.clientHeight + 4) parent.scrollTop = 0;
+            }
+          });
           const title = findTitle();
           if (title) title.scrollIntoView({ block: 'start' });
         } catch (e) {}
@@ -1919,6 +1926,13 @@ function cpMediumPageFill(titleText, bodyHtml, bodyText, imageMeta) {
           window.scrollTo(0, 0);
           document.documentElement.scrollTop = 0;
           document.body.scrollTop = 0;
+          const editors = document.querySelectorAll('[contenteditable="true"], textarea, input');
+          editors.forEach((editor) => {
+            let parent = editor.parentElement;
+            for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
+              if (parent.scrollHeight > parent.clientHeight + 4) parent.scrollTop = 0;
+            }
+          });
         } catch (e) {}
       };
       run();
@@ -2160,6 +2174,13 @@ function cpSubstackPageFill(titleText, subtitleText, bodyHtml, bodyText, expecte
           window.scrollTo(0, 0);
           document.documentElement.scrollTop = 0;
           document.body.scrollTop = 0;
+          const editors = document.querySelectorAll('[contenteditable="true"], textarea, input');
+          editors.forEach((editor) => {
+            let parent = editor.parentElement;
+            for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
+              if (parent.scrollHeight > parent.clientHeight + 4) parent.scrollTop = 0;
+            }
+          });
         } catch (e) {}
       };
       run();
