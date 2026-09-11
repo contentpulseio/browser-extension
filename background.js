@@ -2237,6 +2237,91 @@ async function substackPageFill(tabId, title, subtitle, bodyHtml, bodyText, expe
   }
 }
 
+// Substack's thumbnail picker can render its input before the upload handler
+// is ready. If the thumbnail event is rejected, keep the featured image in
+// the article itself instead of silently losing it. The collapsed selection
+// at the start is important: a normal paste would append the image at the end.
+function cpSubstackInsertHeroAtStart(imageUrl, altText, captionText) {
+  return new Promise(async (resolve) => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const waitFor = async (condition, timeoutMs, stepMs = 250) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const value = condition();
+        if (value) return value;
+        if (Date.now() >= deadline) return null;
+        await sleep(stepMs);
+      }
+    };
+    const editor = await waitFor(
+      () => document.querySelector(
+        'div.tiptap.ProseMirror[data-testid="editor"], div.tiptap.ProseMirror.mousetrap[contenteditable="true"], div.ProseMirror[contenteditable="true"]',
+      ),
+      10000,
+    );
+    if (!editor || !imageUrl) {
+      resolve({ ok: false, reason: 'substack-editor-not-found' });
+      return;
+    }
+
+    try {
+      const before = editor.querySelectorAll('img').length;
+      const escape = (value) => String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+      const html = `<figure><img src="${escape(imageUrl)}" alt="${escape(altText || 'Featured image')}"><figcaption>${escape(captionText || '')}</figcaption></figure>`;
+      editor.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/html', html);
+      dataTransfer.setData('text/plain', captionText || altText || 'Featured image');
+      editor.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dataTransfer,
+      }));
+
+      const deadline = Date.now() + 30000;
+      let imageCount = before;
+      while (Date.now() < deadline) {
+        imageCount = editor.querySelectorAll('img').length;
+        if (imageCount > before) break;
+        await sleep(250);
+      }
+      resolve({ ok: imageCount > before, imageCount, reason: imageCount > before ? undefined : 'hero-body-insert-not-confirmed' });
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
+  });
+}
+
+async function substackInsertHeroAtStart(tabId, imageUrl, altText, captionText) {
+  if (!tabId || !imageUrl) return { ok: false, error: 'Missing tab or hero image URL' };
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: cpSubstackInsertHeroAtStart,
+      args: [imageUrl, altText || '', captionText || ''],
+    });
+    const result = results && results[0] ? results[0].result : null;
+    log('[ContentPulse][bg] substack hero fallback result', result);
+    return result || { ok: false, error: 'No result from Substack hero fallback' };
+  } catch (e) {
+    log('[ContentPulse][bg] substack hero fallback error', e);
+    return { ok: false, error: e.message };
+  }
+}
+
 // ── Substack cover image upload ────────────────────────────────────
 // Runs in Substack's MAIN world. The thumbnail input is already mounted in the
 // current editor as #file-sidebar-file-input; assign the fetched bytes directly
@@ -2302,8 +2387,8 @@ function cpFillSubstackThumbnail(b64, mime, seoTitle, seoDescription) {
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(file);
       input.files = dataTransfer.files;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
       // These are Substack's current file-sidebar fields. They provide useful
       // title/description metadata for the thumbnail and improve its SEO and
@@ -4174,7 +4259,13 @@ async function openAndFill(article, preferredTabId = null) {
       // converts remote <img> URLs into Substack CDN blocks and keeps their
       // figcaptions/alt text. Add the separate thumbnail after that settles.
       await substackPageFill(tabId, title, subtitle, prepared.substackBodyHtml, prepared.bodyText, prepared.substackInlineImages.length, article?.tags || []);
-      if (imageUrl) await substackCoverImage(tabId, imageUrl, title, thumbnailDescription);
+      if (imageUrl) {
+        const coverResult = await substackCoverImage(tabId, imageUrl, title, thumbnailDescription);
+        if (!coverResult?.ok) {
+          const heroCaption = (credit || article?.hero_description || title || 'Featured image').trim().slice(0, 250);
+          await substackInsertHeroAtStart(tabId, imageUrl, title || 'Featured image', heroCaption);
+        }
+      }
     };
 
     const activeTab = await queryTargetTab();
