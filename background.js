@@ -3099,6 +3099,20 @@ function replaceTablesWithImageFigures(html, tableImages) {
   });
 }
 
+function buildSubstackHeroBody(bodyHtml, imageUrl, altText, captionText) {
+  const source = typeof bodyHtml === 'string' ? bodyHtml : '';
+  const url = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+  if (!url || source.includes(url)) return source;
+  const escape = (value) => String(value || '').slice(0, 500)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const figure = `<figure><img src="${escape(url)}" alt="${escape(altText || 'Featured image')}"><figcaption>${escape(captionText || '')}</figcaption></figure>`;
+  return `${figure}${source}`;
+}
+
 // Medium's current editor has no native table block and flattens pasted table
 // markup into ordinary text. Convert any available table renders first, then
 // remove any table that could not be rendered so unsupported markup never
@@ -4253,25 +4267,32 @@ async function openAndFill(article, preferredTabId = null) {
     const thumbnailDescription = article?.seo?.meta_description || credit || title;
     const substackPrepared = tableImagesPromise.then((tableImages) => {
       const substackBodyHtml = replaceTablesWithImageFigures(bodyHtml, tableImages);
+      const heroCaption = (credit || article?.hero_description || title || 'Featured image').trim().slice(0, 250);
+      const heroAlt = (title || heroCaption || 'Featured image').trim().slice(0, 500);
+      const substackBodyWithHeroHtml = buildSubstackHeroBody(substackBodyHtml, imageUrl, heroAlt, heroCaption);
       return {
         substackBodyHtml,
+        substackBodyWithHeroHtml,
         bodyText: stripToText(substackBodyHtml),
+        bodyTextWithHero: stripToText(substackBodyWithHeroHtml),
         substackInlineImages: buildInlineImageMeta(bodyHtml, tableImages),
+        hasHeroInBody: substackBodyWithHeroHtml !== substackBodyHtml,
       };
     });
     const doFill = async (tabId) => {
       const prepared = await substackPrepared;
-      // The body paste is also Substack's working inline-image uploader: it
-      // converts remote <img> URLs into Substack CDN blocks and keeps their
-      // figcaptions/alt text. Add the separate thumbnail after that settles.
-      await substackPageFill(tabId, title, subtitle, prepared.substackBodyHtml, prepared.bodyText, prepared.substackInlineImages.length, article?.tags || []);
+      // Try the thumbnail while Substack's native file-settings input is
+      // idle. If it rejects the synthetic file event, include the hero in the
+      // initial paste so Substack cannot append it after existing blocks.
+      let coverResult = { ok: false };
       if (imageUrl) {
-        const coverResult = await substackCoverImage(tabId, imageUrl, title, thumbnailDescription);
-        if (!coverResult?.ok) {
-          const heroCaption = (credit || article?.hero_description || title || 'Featured image').trim().slice(0, 250);
-          await substackInsertHeroAtStart(tabId, imageUrl, title || 'Featured image', heroCaption);
-        }
+        coverResult = await substackCoverImage(tabId, imageUrl, title, thumbnailDescription);
       }
+      const includeHeroInBody = !coverResult?.ok && prepared.hasHeroInBody;
+      const fillHtml = includeHeroInBody ? prepared.substackBodyWithHeroHtml : prepared.substackBodyHtml;
+      const fillText = includeHeroInBody ? prepared.bodyTextWithHero : prepared.bodyText;
+      const expectedImages = prepared.substackInlineImages.length + (includeHeroInBody ? 1 : 0);
+      await substackPageFill(tabId, title, subtitle, fillHtml, fillText, expectedImages, article?.tags || []);
     };
 
     const activeTab = await queryTargetTab();
