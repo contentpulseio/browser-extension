@@ -886,19 +886,20 @@ async function handleFill() {
   }
 
   log('[ContentPulse][popup] fill ->', selectedArticle.title);
-  // LinkedIn only imports headings/lists/quotes when its trusted browser paste
-  // path runs. Prepare the same text/html + text/plain clipboard payload used
-  // by the manual "Copy formatted" action before invoking the background fill.
-  // The injected page routine attempts native paste first, then keeps its
-  // existing TipTap/HTML fallbacks for browsers that disallow execCommand paste.
-  const clipboardPrepared = await prepareFormattedClipboard(selectedArticle.body_html);
+  // Send the open request before doing clipboard work. This lets the
+  // background create the destination tab immediately; the LinkedIn fill
+  // waits for this token before attempting native rich paste.
+  const clipboardToken = backendPlatform === 'linkedin_pulse'
+    ? `cp-clipboard-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    : '';
   const res = await sendMessage({
     action: 'openAndFill',
     article: {
       id: selectedArticle.id,
       title: selectedArticle.title,
       body_html: selectedArticle.body_html,
-      clipboard_prepared: clipboardPrepared,
+      clipboard_prepared: false,
+      clipboard_token: clipboardToken,
       platform: backendPlatform,
       // Needed by the background to arm the share-dialog auto-fill.
       share_post: selectedArticle.share_post || null,
@@ -931,6 +932,10 @@ async function handleFill() {
   });
 
   if (res && res.ok) {
+    if (clipboardToken) {
+      const clipboardPrepared = await prepareFormattedClipboard(selectedArticle.body_html);
+      await sendMessage({ action: 'clipboardPrepared', token: clipboardToken, prepared: clipboardPrepared });
+    }
     closeUi();
   } else {
     const el = $('detail-error');
