@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const source = fs.readFileSync(path.resolve(__dirname, '..', 'background.js'), 'utf8');
+const source = require('./background-source')();
 const start = source.indexOf('function cpFillSubstackThumbnail');
 const end = source.indexOf('\n\nasync function substackCoverImage', start);
 assert(start >= 0 && end > start, 'cpFillSubstackThumbnail not found');

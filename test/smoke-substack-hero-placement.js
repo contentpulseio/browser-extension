@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const source = fs.readFileSync(path.resolve(__dirname, '..', 'background.js'), 'utf8');
+const source = require('./background-source')();
 const start = source.indexOf('function buildSubstackHeroBody');
 const end = source.indexOf('\n\n// Medium\'s current editor', start);
 assert(start >= 0 && end > start, 'buildSubstackHeroBody not found');

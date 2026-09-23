@@ -1,4 +1,10 @@
-const CP_DEBUG = false;
+const CP_DEBUG = (() => {
+  try {
+    return new URL(location.href).searchParams.get('cp_debug') === '1';
+  } catch (e) {
+    return false;
+  }
+})();
 const log = (...args) => {
   if (CP_DEBUG) console.log(...args);
 };
@@ -10,6 +16,7 @@ const err = (...args) => {
 };
 
 log('[ContentPulse][cs] content script loaded on', location.href);
+log('[ContentPulse][cs] debug enabled', { cp: new URL(location.href).searchParams.get('cp') || null });
 
 const MAX_ATTEMPTS = 10;
 const ATTEMPT_INTERVAL_MS = 500;
@@ -148,15 +155,23 @@ function inExtension() {
 
 function requestPageFill(title, bodyHtml, bodyText) {
   return new Promise((resolve) => {
+    log('[ContentPulse][cs] request pageFill', {
+      titleLength: title?.length || 0,
+      bodyHtmlLength: bodyHtml?.length || 0,
+      bodyTextLength: bodyText?.length || 0,
+    });
     try {
       chrome.runtime.sendMessage({ action: 'pageFill', title, bodyHtml, bodyText }, (res) => {
         if (chrome.runtime.lastError) {
+          err('[ContentPulse][cs] pageFill runtime error', chrome.runtime.lastError.message);
           resolve({ ok: false, error: chrome.runtime.lastError.message });
           return;
         }
+        log('[ContentPulse][cs] pageFill response', res);
         resolve(res || { ok: false });
       });
     } catch (err) {
+      err('[ContentPulse][cs] pageFill send threw', err);
       resolve({ ok: false, error: err.message });
     }
   });
@@ -164,15 +179,19 @@ function requestPageFill(title, bodyHtml, bodyText) {
 
 function requestRuntime(message) {
   return new Promise((resolve) => {
+    log('[ContentPulse][cs] runtime request', message?.action, message);
     try {
       chrome.runtime.sendMessage(message, (res) => {
         if (chrome.runtime.lastError) {
+          err('[ContentPulse][cs] runtime error', message?.action, chrome.runtime.lastError.message);
           resolve({ ok: false, error: chrome.runtime.lastError.message });
           return;
         }
+        log('[ContentPulse][cs] runtime response', message?.action, res);
         resolve(res || { ok: false });
       });
     } catch (e) {
+      err('[ContentPulse][cs] runtime send threw', message?.action, e);
       resolve({ ok: false, error: e.message });
     }
   });
@@ -181,15 +200,24 @@ function requestRuntime(message) {
 function contentIdFromUrl() {
   try {
     const id = new URL(location.href).searchParams.get('cp')?.trim() || '';
-    return CP_ID_RE.test(id) ? id.toUpperCase() : '';
+    const normalized = CP_ID_RE.test(id) ? id.toUpperCase() : '';
+    log('[ContentPulse][cs] parsed cp id', { raw: id || null, normalized: normalized || null });
+    return normalized;
   } catch (e) {
+    warn('[ContentPulse][cs] failed to parse cp id', e);
     return '';
   }
 }
 
 async function autoFillFromContentId() {
   const contentId = contentIdFromUrl();
-  if (!contentId || window.__cpDirectAutoFillStarted) return;
+  if (!contentId || window.__cpDirectAutoFillStarted) {
+    log('[ContentPulse][cs] direct fill skipped', {
+      hasContentId: !!contentId,
+      alreadyStarted: !!window.__cpDirectAutoFillStarted,
+    });
+    return;
+  }
   window.__cpDirectAutoFillStarted = true;
   log('[ContentPulse][cs] cp deep link detected, requesting direct fill', contentId);
 
@@ -200,12 +228,17 @@ async function autoFillFromContentId() {
     showToast(`ContentPulse: Could not load article ${contentId}`, false);
     return;
   }
+  log('[ContentPulse][cs] direct fill accepted', result);
+  if (result.claimed) return;
 
   showToast('ContentPulse: Article loaded from the cp link and filling now', true);
 }
 
 async function fillArticle(article) {
-  log('[ContentPulse][cs] fillArticle', article?.title);
+  log('[ContentPulse][cs] fillArticle started', {
+    title: article?.title,
+    bodyLength: article?.body?.length || 0,
+  });
   const title = article?.title || '';
   const bodyHtml = article?.body || '';
   const bodyText = stripHtml(bodyHtml);
@@ -220,6 +253,10 @@ async function fillArticle(article) {
   }
 
   const { titleEl, bodyEl } = await waitForEditor();
+  log('[ContentPulse][cs] DOM fallback editor result', {
+    title: !!titleEl,
+    body: !!bodyEl,
+  });
 
   if (!titleEl || !bodyEl) {
     err('[ContentPulse][cs] editor fields not found');
@@ -230,7 +267,10 @@ async function fillArticle(article) {
   try {
     insertText(titleEl, title);
     insertText(bodyEl, bodyText);
-    log('[ContentPulse][cs] fill complete');
+    log('[ContentPulse][cs] DOM fallback fill complete', {
+      titleLength: titleEl.value?.length || titleEl.textContent?.length || 0,
+      bodyLength: bodyEl.textContent?.length || 0,
+    });
     showToast('ContentPulse: Article filled successfully', true);
     return true;
   } catch (err) {

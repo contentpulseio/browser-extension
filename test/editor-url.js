@@ -2,12 +2,14 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const source = fs.readFileSync(path.resolve(__dirname, '..', 'background.js'), 'utf8');
+const source = require('./background-source')();
 const popupSource = fs.readFileSync(path.resolve(__dirname, '..', 'popup.js'), 'utf8');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '..', 'content.js'), 'utf8');
+require('../platform-adapters.js');
+const platformAdapters = globalThis.ContentPulsePlatformAdapters;
 assert(source.includes('article?.publish_as_urn'));
 assert(source.includes('function linkedinEditorAuthorUrn(urn)'));
-assert(source.includes('urn ? `${LINKEDIN_EDITOR_URL}?author=${encodeURIComponent(urn)}` : LINKEDIN_EDITOR_URL'));
+assert(source.includes('adapter.buildEditorUrl(article, contentId'));
 const helperStart = source.indexOf('function linkedinEditorAuthorUrn');
 const helperEnd = source.indexOf('\n\nfunction isEditorUrl', helperStart);
 const linkedinEditorAuthorUrn = new Function(
@@ -19,16 +21,39 @@ assert.strictEqual(
   `https://www.linkedin.com/article/new/?author=${encodeURIComponent(linkedinEditorAuthorUrn('urn:li:organization:123456'))}`,
   'https://www.linkedin.com/article/new/?author=urn%3Ali%3Afsd_company%3A123456',
 );
+const withContentId = (url, id) => `${url}${url.includes('?') ? '&' : '?'}cp=${id}`;
+const helpers = {
+  withContentId,
+  linkedinEditorAuthorUrn,
+  normalizeSubstackDomain: (value) => String(value).replace(/^https?:\/\//, '').replace(/\.substack\.com.*$/, ''),
+};
+const linkedIn = platformAdapters.forPlatform('linkedin');
+assert.strictEqual(linkedIn.platform, 'linkedin_pulse');
+assert(linkedIn.matchesEditor('https://www.linkedin.com/article/new/'));
+assert.strictEqual(
+  linkedIn.buildEditorUrl({ publish_as_urn: 'urn:li:organization:123456' }, '01ABC', helpers),
+  'https://www.linkedin.com/article/new/?author=urn%3Ali%3Afsd_company%3A123456&cp=01ABC',
+);
+const medium = platformAdapters.forPlatform('medium');
+assert(medium.matchesEditor('https://medium.com/new-story'));
+assert.strictEqual(medium.buildEditorUrl({}, '01ABC', helpers), 'https://medium.com/new-story?cp=01ABC');
+const substack = platformAdapters.forPlatform('substack');
+assert(substack.matchesEditor('https://publication.substack.com/publish/post/123'));
+assert.strictEqual(
+  substack.buildEditorUrl({ substack_domain: 'publication' }, '01ABC', helpers),
+  'https://publication.substack.com/publish/post?cp=01ABC',
+);
+assert.strictEqual(substack.buildEditorUrl({}, '01ABC', helpers), null);
 assert(popupSource.includes('publish_as_urn: selectedWebsiteLinkedInAuthorUrn()'));
 assert(contentSource.includes('function contentIdFromUrl()'));
 assert(contentSource.includes("action: 'autoFillFromContentId'"));
 assert(contentSource.includes('autoFillFromContentId();'));
-assert(source.includes('async function autoFillFromContentId(contentId, tabId, requestedPlatform)'));
+assert(source.includes('async function autoFillFromContentId(contentId, tabId, requestedPlatform, debugEnabled = false)'));
 assert(source.includes("case 'autoFillFromContentId':"));
 assert(source.includes('message.platform'), 'cp initial-load fill must preserve the current editor platform');
 assert(source.includes('openAndFill(message.article)'));
 assert(source.includes(".then((result) => sendResponse(result || { ok: true }))"));
-assert(source.includes("return /^https:\\/\\/[^/]+\\.substack\\.com\\/publish\\/post(?:\\/|$)/.test(url);"));
+assert(source.includes("ContentPulsePlatformAdapters.forPlatform('substack').matchesEditor(url)"));
 assert(source.includes("if (/^[a-z0-9][a-z0-9-]*$/i.test(value)) return value.toLowerCase();"));
 assert(source.includes("createImageBitmap(file)"), 'Substack thumbnails must convert unsupported image formats');
 assert(source.includes("thumbnail-upload-not-confirmed"), 'Substack thumbnails must verify upload completion');

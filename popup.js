@@ -114,6 +114,10 @@ function setStored(items) {
   return new Promise((resolve) => chrome.storage.sync.set(items, resolve));
 }
 
+function clearPopupCache() {
+  return new Promise((resolve) => chrome.storage.local.remove('cp_popup_state_v1', resolve));
+}
+
 function clearStored() {
   return new Promise((resolve) => chrome.storage.sync.clear(resolve));
 }
@@ -218,11 +222,6 @@ function renderMarquee() {
   addGroup();
 }
 
-function selectedWebsiteName() {
-  const match = websites.find((w) => w.id === selectedWebsiteId);
-  return match ? match.name : '';
-}
-
 function selectedWebsiteLinkedInAuthor() {
   const match = websites.find((w) => w.id === selectedWebsiteId);
   return match?.linkedin_author || '';
@@ -234,28 +233,45 @@ function selectedWebsiteLinkedInAuthorUrn() {
 }
 
 function creditCaption() {
-  if (!selectedArticle) return '';
-  const caption = selectedArticle.title || '';
-  const credit = selectedWebsiteName();
-  return credit ? `${caption}, ${credit}` : caption;
+  return typeof selectedArticle?.credit === 'string' ? selectedArticle.credit.trim() : '';
 }
 
 async function enterConnectedShell() {
-  // One central loader; the queue only appears once account, websites AND
-  // articles are all ready, instead of the page building up in stages.
-  showScreen('screen-boot');
-  await refreshAccount();
-  await loadWebsites();
-  const openedDirectArticle = await loadArticles(selectedWebsiteId);
-  if (!$('screen-onboarding').hidden) return; // session expired during boot
-  if (!openedDirectArticle) showTab('list');
-  showRedditBtnIfNeeded();
+  // Paint the connected shell before any storage or runtime message await.
+  // Account, queue, and direct-editor data then arrive independently so the
+  // popup is useful immediately and each completed request is visible at once.
+  showScreen('screen-list');
+  $('list-error').hidden = true;
+  $('list-empty').hidden = true;
+  $('article-list').innerHTML = '';
+  $('list-loading').hidden = false;
+
+  void refreshAccount().catch((error) => {
+    warn('[ContentPulse][popup] account load failed', error);
+  });
+
+  const queueLoad = getStored(['selectedWebsiteId'])
+    .then(({ selectedWebsiteId: storedWebsiteId }) => loadArticles(storedWebsiteId || null))
+    .catch((error) => {
+      $('list-loading').hidden = true;
+      $('list-error').textContent = error?.message || 'Failed to load the queue.';
+      $('list-error').hidden = false;
+      return false;
+    });
+
+  void queueLoad.then((openedDirectArticle) => {
+    if (!$('screen-onboarding').hidden && !$('screen-list').hidden) return; // session expired during boot
+    if (!openedDirectArticle && !IS_REDDIT_EMBED) showTab('list');
+    showRedditBtnIfNeeded();
+  });
 
   if (IS_REDDIT_EMBED) {
-    $('reddit-tools-btn').hidden = false;
-    await checkRedditTab();
-    showScreen('screen-reddit');
-    redditCollectAndSync();
+    void queueLoad.then(async () => {
+      $('reddit-tools-btn').hidden = false;
+      await checkRedditTab();
+      showScreen('screen-reddit');
+      redditCollectAndSync();
+    });
   }
 }
 
@@ -281,36 +297,6 @@ function renderAccountBar(tenant) {
 async function refreshAccount() {
   const cached = await getStored(['tenant']);
   renderAccountBar(cached.tenant);
-}
-
-async function loadWebsites() {
-  const select = $('website-select');
-  const res = await sendMessage({ action: 'getWebsites' });
-
-  if (!res || !res.ok || !Array.isArray(res.websites) || res.websites.length === 0) {
-    websites = [];
-    selectedWebsiteId = null;
-    $('website-filter').hidden = true;
-    return;
-  }
-
-  websites = res.websites;
-
-  const { selectedWebsiteId: stored } = await getStored(['selectedWebsiteId']);
-  const validStored = stored && websites.some((w) => w.id === stored);
-  selectedWebsiteId = validStored ? stored : websites[0].id;
-  await setStored({ selectedWebsiteId });
-
-  select.innerHTML = '';
-  for (const w of websites) {
-    const opt = document.createElement('option');
-    opt.value = w.id;
-    opt.textContent = w.name;
-    select.appendChild(opt);
-  }
-  select.value = selectedWebsiteId;
-
-  $('website-filter').hidden = websites.length <= 1;
 }
 
 async function handleWebsiteChange() {
@@ -360,6 +346,7 @@ async function handleSaveConnect() {
   btn.textContent = 'Save & Connect';
 
   if (res && res.ok) {
+    await clearPopupCache();
     await setStored({ apiKey, user: res.user, tenant: res.tenant });
     log('[ContentPulse][popup] connected as', res.user?.email);
 
@@ -380,13 +367,17 @@ async function loadArticles(websiteId = selectedWebsiteId) {
   $('article-list').innerHTML = '';
   $('list-loading').hidden = false;
 
-  const res = await sendMessage({ action: 'getArticles', websiteId });
-  $('list-loading').hidden = true;
+  // Keep the active-tab lookup independent. Queue data can render as soon as
+  // the background responds; a cp deep-link is an optional second stage.
+  const tabUrlPromise = activeTabUrl();
+  const res = await sendMessage({ action: 'getPopupState', websiteId });
 
   if (!res || !res.ok) {
+    $('list-loading').hidden = true;
     if (res && res.status === 401) {
       warn('[ContentPulse][popup] 401 from getArticles, returning to connect');
       await clearStored();
+      await clearPopupCache();
       enterDisconnectedShell();
       showOnboardingError('Your session expired. Please reconnect.');
       return false;
@@ -397,12 +388,18 @@ async function loadArticles(websiteId = selectedWebsiteId) {
     return false;
   }
 
+  // The queue, websites, and account header are now available without
+  // waiting for the active tab or a direct article request.
+  $('list-loading').hidden = true;
+  applyPopupStateUpdate(res);
+  await setStored({ selectedWebsiteId });
+
   currentArticles = res.articles || [];
 
   // If the active editor/app URL identifies an article, load that exact
   // article and open its detail screen. This also works for published content
   // that is intentionally absent from the pending queue.
-  const directContentId = contentIdFromUrl(await activeTabUrl());
+  const directContentId = contentIdFromUrl(await tabUrlPromise);
   if (directContentId) {
     const direct = await sendMessage({ action: 'getArticle', contentId: directContentId });
     if (direct?.ok && direct.article) {
@@ -488,6 +485,45 @@ function renderArticleList() {
   }
 }
 
+function applyPopupStateUpdate(state) {
+  if (!state) return;
+  if (!state.ok) {
+    if (state.status === 401) {
+      Promise.all([clearStored(), clearPopupCache()]).then(() => {
+        enterDisconnectedShell();
+        showOnboardingError('Your session expired. Please reconnect.');
+      });
+    }
+    return;
+  }
+  if (selectedWebsiteId && state.selectedWebsiteId && selectedWebsiteId !== state.selectedWebsiteId) return;
+
+  websites = Array.isArray(state.websites) ? state.websites : websites;
+  selectedWebsiteId = state.selectedWebsiteId || selectedWebsiteId;
+  currentArticles = Array.isArray(state.articles) ? state.articles : currentArticles;
+
+  const select = $('website-select');
+  select.innerHTML = '';
+  for (const website of websites) {
+    const option = document.createElement('option');
+    option.value = website.id;
+    option.textContent = website.name;
+    select.appendChild(option);
+  }
+  select.value = selectedWebsiteId || '';
+  $('website-filter').hidden = websites.length <= 1;
+
+  // Do not replace an article detail view while its full article is loading
+  // or being filled. The next queue refresh will be picked up on reopen.
+  if (!$('screen-list').hidden) renderArticleList();
+}
+
+if (chrome.runtime.onMessage?.addListener) {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.action === 'popupStateUpdated') applyPopupStateUpdate(message.state);
+  });
+}
+
 // Internal tabs of the detail screen (Publish / Content / SEO). The old layout
 // stacked every card vertically, which made the popup a long scroll; tabs keep
 // it compact and grouped by intent.
@@ -516,7 +552,30 @@ function platformIdFromArticle(article) {
   return null;
 }
 
-function openDetail(article) {
+async function openDetail(article) {
+  selectedArticle = article;
+  showScreen('screen-detail');
+  $('detail-error').hidden = true;
+  $('detail-title').textContent = article.title || 'Loading article…';
+  $('detail-excerpt').textContent = 'Loading article…';
+
+  if (typeof article.body_html !== 'string') {
+    const res = await sendMessage({ action: 'getArticle', contentId: article.id });
+    if (selectedArticle !== article) return;
+    if (!res?.ok || !res.article) {
+      $('detail-error').textContent = res?.error || 'Failed to load the article.';
+      $('detail-error').hidden = false;
+      return;
+    }
+    article = res.article;
+    selectedArticle = article;
+    currentArticles = currentArticles.map((item) => (String(item.id) === String(article.id) ? article : item));
+  }
+
+  renderDetail(article);
+}
+
+function renderDetail(article) {
   selectedArticle = article;
   const articlePlatform = platformIdFromArticle(article);
   selectedPlatform = articlePlatform || (PLATFORMS.find((p) => p.live) || PLATFORMS[0]).id;
@@ -898,6 +957,7 @@ async function handleFill() {
       id: selectedArticle.id,
       title: selectedArticle.title,
       body_html: selectedArticle.body_html,
+      hero_description: selectedArticle.hero_description || '',
       clipboard_prepared: false,
       clipboard_token: clipboardToken,
       platform: backendPlatform,
@@ -1204,6 +1264,7 @@ async function handleDisconnect() {
   if (!confirmed) return;
   log('[ContentPulse][popup] disconnect');
   await clearStored();
+  await clearPopupCache();
   window.location.reload();
 }
 
@@ -1613,25 +1674,7 @@ async function initImpl() {
     return;
   }
 
-  log('[ContentPulse][popup] existing key found, verifying it is still valid');
-  showScreen('screen-boot');
-  const res = await sendMessage({ action: 'validateKey', apiKey });
-
-  if (res && res.ok) {
-    await setStored({ user: res.user, tenant: res.tenant });
-    await enterConnectedShell();
-    return;
-  }
-
-  if (res && res.status === 401) {
-    warn('[ContentPulse][popup] stored key is no longer valid, signing out');
-    await clearStored();
-    enterDisconnectedShell();
-    showOnboardingError('Your access has ended or the key was revoked. Please reconnect.');
-    return;
-  }
-
-  warn('[ContentPulse][popup] could not verify key (offline?), showing cached queue');
+  log('[ContentPulse][popup] existing key found, loading cached queue');
   await enterConnectedShell();
 }
 

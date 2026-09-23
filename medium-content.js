@@ -183,5 +183,6 @@ window.addEventListener('message', (event) => {
     showToast(`ContentPulse: Could not load article ${contentId}`, false);
     return;
   }
+  if (result.claimed) return;
   showToast('ContentPulse: Article loaded from the cp link and filling now', true);
 })();
