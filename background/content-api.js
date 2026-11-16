@@ -67,8 +67,8 @@ function getWebsites() {
   return request;
 }
 
-async function fetchByStatus(apiKey, status, websiteId) {
-  let url = `${API_BASE}/content?status=${encodeURIComponent(status)}&per_page=100&sort=scheduled_at&direction=asc&render_mode=extension`;
+async function fetchByStatus(apiKey, status, websiteId, { perPage = 100, sort = 'scheduled_at', direction = 'asc' } = {}) {
+  let url = `${API_BASE}/content?status=${encodeURIComponent(status)}&per_page=${perPage}&sort=${sort}&direction=${direction}&render_mode=extension`;
   if (websiteId) {
     url += `&website_id=${encodeURIComponent(websiteId)}`;
   }
@@ -119,6 +119,20 @@ async function fetchArticles(websiteId) {
   }
 }
 
+// The queue only holds pending content. Published articles (needed to refill an
+// already-published editor with the latest version) are loaded on demand.
+async function getPublishedArticles(websiteId) {
+  const { apiKey } = await getStored(['apiKey']);
+  if (!apiKey) return { ok: false, status: 401, error: 'No API key stored. Please connect first.' };
+  try {
+    const list = await fetchByStatus(apiKey, 'published', websiteId, { perPage: 25, sort: 'created_at', direction: 'desc' });
+    return { ok: true, status: 200, articles: list.filter((item) => item && item.id).map(normalizeArticle).map(articleSummary) };
+  } catch (e) {
+    log('[ContentPulse][bg] getPublishedArticles error', e);
+    return { ok: false, status: e.status || 0, error: e.message };
+  }
+}
+
 function getArticles(websiteId) {
   const key = String(websiteId || '');
   if (articleRequests.has(key)) return articleRequests.get(key);
@@ -142,6 +156,7 @@ function articleSummary(article) {
     image_url: article.image_url,
     external_url: article.external_url,
     article_url: article.article_url,
+    dashboard_url: article.dashboard_url,
     substack_domain: article.substack_domain,
   };
 }

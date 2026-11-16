@@ -65,8 +65,8 @@ function publishedSubstackUrl(url) {
 // edits of an existing article, or unexpected redirects).
 const publishWatch = new Map();
 
-function watchTabForPublish(tabId, contentId, platform, initialUrl, shareText) {
+function watchTabForPublish(tabId, contentId, platform, initialUrl, shareText, editUrl) {
   if (!tabId || !contentId || !platform) return;
-  publishWatch.set(tabId, { contentId, platform, initialUrl: initialUrl || '', shareText: shareText || '' });
+  publishWatch.set(tabId, { contentId, platform, initialUrl: initialUrl || '', shareText: shareText || '', editUrl: editUrl || '' });
   log('[ContentPulse][bg] watching tab', tabId, 'for publish of content', contentId);
 }

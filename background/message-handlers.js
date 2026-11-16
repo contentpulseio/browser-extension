@@ -19,6 +19,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       getPopupState(message.websiteId).then(sendResponse);
       return true;
 
+    case 'getPublishedArticles':
+      getPublishedArticles(message.websiteId).then(sendResponse);
+      return true;
+
     case 'getArticle':
       getArticle(message.contentId).then(sendResponse);
       return true;

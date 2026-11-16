@@ -20,6 +20,16 @@ function extractHeroDescription(item) {
   return typeof data.description === 'string' ? data.description.trim() : '';
 }
 
+// Accept the API's dashboard_url only when it is an https URL on the app origin;
+// otherwise build the edit link locally.
+function safeDashboardUrl(value, id) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && url.origin === new URL(APP_BASE_URL).origin) return url.href;
+  } catch (e) {}
+  return `${APP_BASE_URL}/content/${encodeURIComponent(id)}/edit`;
+}
+
 function normalizeArticle(item) {
   const version = item.current_version || {};
   const title = item.title || version.title || 'Untitled';
@@ -101,6 +111,9 @@ function normalizeArticle(item) {
     image_url: imageUrl,
     external_url: typeof item.external_url === 'string' ? item.external_url : null,
     article_url: typeof item.article_url === 'string' ? item.article_url : null,
+    // Older API responses have no dashboard_url; build the edit link locally.
+    dashboard_url:
+      safeDashboardUrl(item.dashboard_url, item.id),
     share_post: sharePost,
     seo,
     tags,

@@ -12,6 +12,8 @@ the formatted / HTML version to paste anywhere.
 - **AI content, ready to ship** — pull scheduled & in‑review articles from your workspace.
 - **One‑click fill** — title, body, headings, links & images dropped into the editor.
 - **cp deep-link fill** — opening an editor URL with `?cp=<content ULID>` automatically loads and fills that exact article without opening the panel.
+- **Back to ContentPulse** — an "Edit in ContentPulse" link (popup/panel and a chip on the editor page) opens the article's dashboard edit screen, where corrections create a new version.
+- **Refill with latest** — every fill fetches the latest saved version. Use **Show published articles** in the queue, open the article, and click **Refill with latest** on an existing editor (e.g. `linkedin.com/article/edit/<id>`) to replace its content with the updated version.
 - **SEO built in** — meta title, description, keywords & featured image come along.
 - **Scheduled editor assistance (opt-in)** — the toolbar badge shows today’s pending LinkedIn, Medium, and Substack items; when enabled in Settings, the matching editor opens and is filled at the scheduled time for final review.
 - **Reliable backup** — if an auto‑publish integration ever fails, copy formatted or HTML and paste into any platform.

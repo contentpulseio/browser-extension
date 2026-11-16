@@ -10,9 +10,42 @@ function cpPublishCapturedToast(message) {
   } catch (e) {}
 }
 
+// Persistent link from the editor page back to the article in the ContentPulse
+// dashboard (where corrections create a new version). Injected after a fill and
+// re-injected on full page loads of the watched editor tab.
+function cpShowEditLink(url) {
+  try {
+    if (!/^https:\/\//i.test(String(url))) return;
+    const existing = document.getElementById('cp-edit-link');
+    if (existing) {
+      existing.href = url;
+      return;
+    }
+    const a = document.createElement('a');
+    a.id = 'cp-edit-link';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Edit in ContentPulse';
+    a.style.cssText =
+      'position:fixed;bottom:20px;left:20px;z-index:2147483647;padding:10px 14px;border-radius:8px;font:600 13px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;background:#1f2937;text-decoration:none;box-shadow:0 6px 20px rgba(0,0,0,.25)';
+    document.body.appendChild(a);
+  } catch (e) {}
+}
+
+function injectEditLink(tabId, editUrl) {
+  if (!tabId || !editUrl) return;
+  try {
+    chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: cpShowEditLink, args: [editUrl] }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {}
+}
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const watch = publishWatch.get(tabId);
   if (!watch) return;
+  if (changeInfo.status === 'complete') injectEditLink(tabId, watch.editUrl);
 
   const currentUrl = changeInfo.url || tab?.url || '';
   const liveUrl = publishedLinkedInUrl(currentUrl) || publishedMediumUrl(currentUrl) || publishedSubstackUrl(currentUrl);
@@ -100,6 +133,7 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
       }
     : article?.share_post;
   const shareText = composeShareText(sharePost);
+  const editUrl = typeof article?.dashboard_url === 'string' ? article.dashboard_url : '';
   const clipboardPrepared = article?.clipboard_prepared === true;
   const clipboardToken = article?.clipboard_token || '';
   log('[ContentPulse][bg] openAndFill ->', title, 'platform:', platform);
@@ -214,7 +248,8 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
     const activeTab = await queryTargetTab();
     if (activeTab && isMediumEditorUrl(activeTab.url)) {
       log('[ContentPulse][bg] active tab is Medium editor, filling in place');
-      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
+      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '', editUrl);
+      injectEditLink(activeTab.id, editUrl);
       fillMediumTab(activeTab.id);
       return { ok: true, tabId: activeTab.id, reused: true };
     }
@@ -224,7 +259,7 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
     return createEditorTab(editorUrl, (tab) => {
       const targetTabId = tab.id;
       claimBackgroundFill(targetTabId, contentId);
-      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
+      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '', editUrl);
 
       let readyHandled = false;
       const listener = (tabId, changeInfo) => {
@@ -282,7 +317,8 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
     const activeTab = await queryTargetTab();
     if (activeTab && isSubstackEditorUrl(activeTab.url)) {
       log('[ContentPulse][bg] active tab is Substack editor, filling in place');
-      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '');
+      watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, '', editUrl);
+      injectEditLink(activeTab.id, editUrl);
       doFill(activeTab.id);
       return { ok: true, tabId: activeTab.id, reused: true };
     }
@@ -301,7 +337,7 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
     return createEditorTab(editorUrl, (tab) => {
       const targetTabId = tab.id;
       claimBackgroundFill(targetTabId, contentId);
-      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '');
+      watchTabForPublish(targetTabId, contentId, platform, editorUrl, '', editUrl);
 
       let readyHandled = false;
       const listener = (tabId, changeInfo) => {
@@ -366,7 +402,8 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
   const activeTab = await queryTargetTab();
   if (activeTab && isEditorUrl(activeTab.url)) {
     log('[ContentPulse][bg] active tab is already the editor, filling in place');
-    watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, shareText);
+    watchTabForPublish(activeTab.id, contentId, platform, activeTab.url, shareText, editUrl);
+    injectEditLink(activeTab.id, editUrl);
     fillLinkedInTab(activeTab.id);
     armShareFill(activeTab.id);
     return { ok: true, tabId: activeTab.id, reused: true };
@@ -385,7 +422,7 @@ async function openAndFill(article, preferredTabId = null, debugEnabled = false)
   return createEditorTab(editorUrl, (tab) => {
     const targetTabId = tab.id;
     claimBackgroundFill(targetTabId, contentId);
-    watchTabForPublish(targetTabId, contentId, platform, editorUrl, shareText);
+    watchTabForPublish(targetTabId, contentId, platform, editorUrl, shareText, editUrl);
 
     let readyHandled = false;
     const listener = (tabId, changeInfo) => {

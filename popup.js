@@ -10,7 +10,6 @@ const warn = (...args) => {
 
 const SCREENS = ['screen-boot', 'screen-onboarding', 'screen-list', 'screen-detail', 'screen-settings', 'screen-reddit'];
 
-const APP_BASE_URL = 'https://app.contentpulse.io';
 const AUTO_FILL_SCHEDULED_KEY = 'cp_auto_fill_scheduled_enabled';
 const CONTENT_ID_PARAM = 'cp';
 
@@ -361,6 +360,23 @@ async function handleSaveConnect() {
   }
 }
 
+// Published articles are not part of the pending queue; load them on demand so
+// an already-published editor can be refilled with the latest version.
+async function handleShowPublished() {
+  const btn = $('published-btn');
+  btn.disabled = true;
+  $('list-error').hidden = true;
+  const res = await sendMessage({ action: 'getPublishedArticles', websiteId: selectedWebsiteId });
+  btn.disabled = false;
+  if (!res?.ok) {
+    $('list-error').textContent = res?.error || 'Failed to load published articles.';
+    $('list-error').hidden = false;
+    return;
+  }
+  currentArticles = res.articles || [];
+  renderArticleList();
+}
+
 async function loadArticles(websiteId = selectedWebsiteId) {
   $('list-error').hidden = true;
   $('list-empty').hidden = true;
@@ -472,7 +488,7 @@ function renderArticleList() {
 
     const btn = document.createElement('button');
     btn.className = 'cp-btn cp-btn-primary cp-btn-sm cp-article-publish';
-    btn.textContent = 'Publish';
+    btn.textContent = article.status === 'published' ? 'Refill' : 'Publish';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       openDetail(article);
@@ -766,7 +782,11 @@ function updateFillButton() {
   if (!btn) return;
   const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
   btn.disabled = false;
-  btn.title = `Fill the ${platform.name} editor`;
+  const published = selectedArticle?.status === 'published';
+  btn.textContent = published ? 'Refill with latest' : 'Fill in editor';
+  btn.title = published
+    ? `Replace the open ${platform.name} editor content with the latest ContentPulse version`
+    : `Fill the ${platform.name} editor`;
 }
 
 async function handleDownloadImage() {
@@ -802,7 +822,7 @@ async function handleDownloadImage() {
 
 function handleManage() {
   if (!selectedArticle) return;
-  chrome.tabs.create({ url: `${APP_BASE_URL}/content/${selectedArticle.id}` });
+  chrome.tabs.create({ url: selectedArticle.dashboard_url });
 }
 
 function flashCopied(btn) {
@@ -944,6 +964,16 @@ async function handleFill() {
     return;
   }
 
+  // Always fill from the latest saved version: corrections made in ContentPulse
+  // after this article was loaded must not be overwritten by stale content.
+  const fresh = await sendMessage({ action: 'getArticle', contentId: selectedArticle.id });
+  if (!fresh?.ok || !fresh.article) {
+    $('detail-error').textContent = fresh?.error || 'Could not load the latest version of this article.';
+    $('detail-error').hidden = false;
+    return;
+  }
+  selectedArticle = fresh.article;
+
   log('[ContentPulse][popup] fill ->', selectedArticle.title);
   // Send the open request before doing clipboard work. This lets the
   // background create the destination tab immediately; the LinkedIn fill
@@ -985,6 +1015,8 @@ async function handleFill() {
       categories: selectedArticle.categories || [],
       // Canonical URL for cross-posted content (Medium "More settings").
       article_url: selectedArticle.article_url || null,
+      // Link shown on the editor page to jump back to the ContentPulse article.
+      dashboard_url: selectedArticle.dashboard_url || null,
       // Substack publication slug/domain used when the scheduled flow needs
       // to open a new editor instead of filling an already-open one.
       substack_domain: selectedArticle.substack_domain || '',
@@ -1639,6 +1671,7 @@ async function initImpl() {
   });
   $('detail-back-btn').addEventListener('click', () => showTab('list'));
   $('fill-btn').addEventListener('click', handleFill);
+  $('published-btn').addEventListener('click', handleShowPublished);
   $('schedule-btn').addEventListener('click', handleSchedule);
   $('fill-seo-btn').addEventListener('click', handleFillSeo);
   $('save-published-url-btn').addEventListener('click', handleSavePublishedUrl);

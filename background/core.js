@@ -1,5 +1,6 @@
 // ContentPulse background: core.
 const API_BASE = 'https://contentpulse.io/api/v1';
+const APP_BASE_URL = 'https://app.contentpulse.io';
 
 const PENDING_STATUSES = ['draft', 'review', 'scheduled'];
 
